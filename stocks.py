@@ -684,7 +684,7 @@ def check_alerts(data):
     if volume_spike:
         grouped.append(fmt(volume_spike, "📈", "Vol Spike"))
     if custom:
-        grouped.append(f"⚡ <strong>Custom:</strong> {len(custom)}")
+        grouped.append(fmt(custom, "⚡", "Custom"))
     return {"grouped": grouped, "time": now.strftime("%I:%M %p")}
 
 
@@ -1874,11 +1874,14 @@ def html(df, vix, fg, aaii, file, ext=False, alerts=None):
     except Exception:
         cvr3_signal = "NEUTRAL"
 
-    def index_str(data, name):
+    def index_str(data, name, invert=False):
         if data["price"] is None:
             return f'<span class="neutral">{name}: N/A</span>'
         ch_abs = data.get("change_abs")
-        cls = "positive" if ch_abs is not None and ch_abs >= 0 else "negative"
+        if invert:
+            cls = "negative" if ch_abs is not None and ch_abs >= 0 else "positive"
+        else:
+            cls = "positive" if ch_abs is not None and ch_abs >= 0 else "negative"
         return f'<span class="{cls}">{name}: {na(data["price"])} ({na(ch_abs, "{:+.2f}")})</span>'
 
     # CVR3 signal color
@@ -1888,9 +1891,12 @@ def html(df, vix, fg, aaii, file, ext=False, alerts=None):
         else ("negative" if cvr3_signal in ("SELL", "SHORT") else "neutral")
     )
     cvr3_str = f'<span class="{cvr3_color}">CVR3: {cvr3_signal}</span>'
+    
+    # Commodities line
+    commodities_h = f'{index_str(gold, "Gold")} | {index_str(silver, "Silver")} | {index_str(copper, "Copper")} | {index_str(bitcoin, "Bitcoin")}'
 
     # Build single-line market summary with all global indexes
-    indices_h = f'{index_str(dow, "Dow")} | {index_str(sp, "S&P")} | {index_str(nas, "Nasdaq")} | {index_str(vix, "VIX")} | {index_str(gold, "Gold")} | {index_str(silver, "Silver")} | {index_str(copper, "Copper")} | {index_str(bitcoin, "Bitcoin")}'
+    indices_h = f'{index_str(dow, "Dow")} | {index_str(sp, "S&P")} | {index_str(nas, "Nasdaq")} | {index_str(vix, "VIX", invert=True)}'
 
     fg_h = '<span class="neutral">F&G: N/A</span>'
     if fg.get("score") is not None:
@@ -2045,12 +2051,23 @@ input#tickerFilter:focus{{border-color:var(--accent);box-shadow:0 0 0 3px rgba(5
 {banner}
 <div class="top-bar" style="margin-bottom:0">
 <div style="display:flex;align-items:baseline;gap:12px"><h1 style="margin:0">📊 Dashboard</h1><small>{update}</small></div>
-<div style="display:flex;align-items:center;white-space:nowrap">
-<span id="marketIndices">{indices_h}</span>
+<details class="quick-links-section" style="margin-left:auto">
+<summary>🔗 Quick Links</summary>
+<div class="quick-links-content">
+<ul>
+<li><a href="https://tradingeconomics.com/us100:ind" target="_blank">US 100</a> | <a href="https://tradingeconomics.com/calendar" target="_blank">Calendar</a> | <a href="https://www.ssga.com/us/en/intermediary/resources/sector-tracker#currentTab=dayFive" target="_blank">Sectors</a> | <a href="https://tradingeconomics.com/stream" target="_blank">News</a> | <a href="https://finviz.com/news.ashx" target="_blank">Finviz</a></li>
+<li><a href="https://www.slickcharts.com/market-movers" target="_blank">Market Movers</a> | <a href="https://stockanalysis.com/markets/gainers/" target="_blank">SA: Movers</a> | <a href="https://stockanalysis.com/trending" target="_blank">SA: Trending</a> | <a href="https://stockanalysis.com/markets/heatmap/?time=1W" target="_blank">Heat Map</a> | <a href="https://www.morningstar.com/markets" target="_blank">MS: Markets</a></li>
+<li><a href="https://www.trackinsight.com/en" target="_blank">Flows</a> | <a href="https://www.google.com/search?q=https://www.morningstar.com/topics/fund-flows" target="_blank">MS: Flows</a> | <a href="https://www.ssga.com/us/en/intermediary/insights/a-feast-of-etf-inflows-and-returns" target="_blank">SPDR: Flows</a> | <a href="https://www.etf.com/sections/daily-etf-flows" target="_blank">ETF.com</a> | <a href="https://etfdb.com/etf-fund-flows/#issuer=blackrock-inc" target="_blank">ETFdb</a></li>
+<li><a href="https://www.cnn.com/markets/fear-and-greed" target="_blank">Fear & Greed Index</a> | <a href="https://www.aaii.com/sentiment-survey" target="_blank">AAII Sentiment</a> | <a href="https://chartschool.stockcharts.com/table-of-contents/trading-strategies-and-models" target="_blank">Trading Strategies</a></li>
+</ul>
 </div>
+</details>
 </div>
 <div style="padding:4px 15px;background:var(--card);border-bottom:1px solid var(--border);font-size:0.9em;text-align:center;margin-top:0;margin-bottom:6px">
-<span>{cvr3_str}</span> | <span>{fg_h}</span> | <span>{aaii_h}</span>
+<span>{commodities_h}</span> | <span>{cvr3_str}</span> | <span>{fg_h}</span> | <span>{aaii_h}</span>
+</div>
+<div style="padding:4px 15px;background:var(--card);border-bottom:1px solid var(--border);font-size:0.9em;text-align:center;margin-top:0;margin-bottom:6px">
+<span id="marketIndices">{indices_h}</span>
 </div>
 
 <div class="controls-container">
@@ -2069,18 +2086,6 @@ input#tickerFilter:focus{{border-color:var(--accent);box-shadow:0 0 0 3px rgba(5
 </div>
 </div>
 
-<details class="quick-links-section">
-<summary>🔗 Quick Links</summary>
-<div class="quick-links-content">
-<ul>
-<li><a href="https://tradingeconomics.com/us100:ind" target="_blank">US 100</a> | <a href="https://tradingeconomics.com/calendar" target="_blank">Calendar</a> | <a href="https://www.ssga.com/us/en/intermediary/resources/sector-tracker#currentTab=dayFive" target="_blank">Sectors</a> | <a href="https://tradingeconomics.com/stream" target="_blank">News</a></li>
-<li><a href="https://www.slickcharts.com/market-movers" target="_blank">Market Movers</a> | <a href="https://stockanalysis.com/markets/gainers/" target="_blank">SA: Movers</a> | <a href="https://stockanalysis.com/trending" target="_blank">SA: Trending</a> | <a href="https://stockanalysis.com/markets/heatmap/?time=1W" target="_blank">Heat Map</a> | <a href="https://www.morningstar.com/markets" target="_blank">MS: Markets</a></li>
-<li><a href="https://www.trackinsight.com/en" target="_blank">Flows</a> | <a href="https://www.google.com/search?q=https://www.morningstar.com/topics/fund-flows" target="_blank">MS: Flows</a> | <a href="https://www.ssga.com/us/en/intermediary/insights/a-feast-of-etf-inflows-and-returns" target="_blank">SPDR: Flows</a> | <a href="https://www.etf.com/sections/daily-etf-flows" target="_blank">ETF.com</a> | <a href="https://etfdb.com/etf-fund-flows/#issuer=blackrock-inc" target="_blank">ETFdb</a></li>
-<li><a href="https://www.cnn.com/markets/fear-and-greed" target="_blank">Fear & Greed Index</a> | <a href="https://www.aaii.com/sentiment-survey" target="_blank">AAII Sentiment</a> | <a href="https://chartschool.stockcharts.com/table-of-contents/trading-strategies-and-models" target="_blank">Trading Strategies</a></li>
-</ul>
-</div>
-</details>
-
 <div class="quick-filters">
 <div class="chip active" data-filter="all">All</div>
 <div class="chip" data-filter="m7">⭐ Starred</div>
@@ -2095,10 +2100,10 @@ input#tickerFilter:focus{{border-color:var(--accent);box-shadow:0 0 0 3px rgba(5
 <div class="chip" data-filter="surge">🚀 Surge</div>
 <div class="chip" data-filter="crash">💥 Crash</div>
 <div class="chip" data-filter="dividend">💰 Dividend</div>
-<div class="chip" data-filter="cat-major-tech">🌐 Major Tech/Growth</div>
-<div class="chip" data-filter="cat-leveraged-etf">⚡ Leveraged/Inverse ETFs</div>
-<div class="chip" data-filter="cat-sector-etf">🏦 Sector & Index ETFs</div>
-<div class="chip" data-filter="cat-emerging-tech">🚧 Emerging Tech (AI/Energy)</div>
+<div class="chip" data-filter="cat-major-tech">🌐 Tech</div>
+<div class="chip" data-filter="cat-leveraged-etf">⚡ Leveraged</div>
+<div class="chip" data-filter="cat-sector-etf">🏦 ETFs</div>
+<div class="chip" data-filter="cat-emerging-tech">🚧 Emerging Tech</div>
 <div class="chip" data-filter="cat-spec-meme">🎲 Speculative</div>
 <div class="chip" data-filter="squeeze">🔥 Squeeze</div>
 <div class="chip" data-filter="bb-squeeze">📏 BB Squeeze</div>
@@ -2115,7 +2120,7 @@ input#tickerFilter:focus{{border-color:var(--accent);box-shadow:0 0 0 3px rgba(5
 <div id="tableView">
 <table id="stockTable">
 <tr>
-<th data-sort="ticker">⭐ TICKER</th>
+<th data-sort="ticker">TICKER</th>
 <th data-sort="price">PRICE</th>
 <th data-sort="volume_raw">VOLUME</th>
 <th data-sort="change_pct">DAY %</th>
