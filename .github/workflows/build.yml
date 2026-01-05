@@ -1,0 +1,59 @@
+name: Update Dashboard
+on:
+  schedule:
+    # 4 AM - 4 PM PST on Weekdays (Monday-Friday) - every 30 minutes
+    # UTC is +8 hours: 12:00 PM to 12:00 AM. 
+    # '1-6' covers the Friday afternoon PST run which occurs on Saturday UTC.
+    - cron: '0,30 0,12-23 * * 1-6'
+  workflow_dispatch: 
+permissions:
+  contents: write
+jobs:
+  run-script:
+    runs-on: ubuntu-latest
+    # This prevents multiple versions of this job from running at the exact same time
+    concurrency:
+      group: stock-update
+      cancel-in-progress: true
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1  # Shallow clone - we don't need history for generated files
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; else pip install yfinance pandas requests; fi
+      - name: Run stocks.py
+        run: python stocks.py
+      - name: Deploy dashboards (no history tracking)
+        if: success()
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # Stage only HTML files
+          git add data/*.html
+          
+          if git diff --staged --quiet; then
+            echo "No changes to deploy."
+            exit 0
+          fi
+          
+          # Commit with --amend to replace last commit (no new history)
+          # First commit will create history, subsequent ones reuse the same commit
+          if git log --oneline -1 | grep -q "Deploy dashboard"; then
+            git commit --amend --no-edit
+          else
+            git commit -m "Deploy dashboard - auto-updated"
+          fi
+          
+          # Force push to main (overwrites, no history accumulation)
+          git push --force origin main
+          
+          echo "✓ Dashboards updated on main branch (no history tracking)"
