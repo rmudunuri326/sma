@@ -37,7 +37,7 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           
-          # Stage only HTML files
+          # Stage only HTML files in data directory
           git add data/*.html
           
           if git diff --staged --quiet; then
@@ -45,15 +45,8 @@ jobs:
             exit 0
           fi
           
-          # Commit with --amend to replace last commit (no new history)
-          # First commit will create history, subsequent ones reuse the same commit
-          if git log --oneline -1 | grep -q "Deploy dashboard"; then
-            git commit --amend --no-edit
-          else
-            git commit -m "Deploy dashboard - auto-updated"
-          fi
+          # Commit and push only HTML files with no history tracking
+          git commit -m "Deploy dashboard - auto-updated [skip ci]"
+          git push origin main
           
-          # Force push to main (overwrites, no history accumulation)
-          git push --force origin main
-          
-          echo "✓ Dashboards updated on main branch (no history tracking)"
+          echo "✓ Dashboards updated on main branch (HTML files only)"
