@@ -3,6 +3,8 @@
 ## Features
 
 ### 📊 Multi-View Dashboard
+**Auto-Detecting Market Hours**: The dashboard automatically detects whether it's regular trading hours (9:30 AM - 4:00 PM ET, Mon-Fri) or extended hours, and fetches appropriate data accordingly. Extended hours sessions are indicated with a badge at the top of the dashboard.
+
 - **Table View**: Sortable columns with detailed metrics and sparklines
   - All time period changes (Day, 5D, 1M, 6M, YTD, 1Y) with sparklines
   - Golden Cross / Death Cross indicators in INDICATORS column
@@ -12,7 +14,7 @@
   - **Page 1**: Price action, volume, technical indicators (BB, RSI, MACD, MA), and options metrics
   - **Page 2**: Fundamentals, dividends, earnings, and **ATR-based Trade Setup** recommendations
   - **Page 3**: Visual range charts (Day, 52W, Bollinger Bands, Implied Move)
-  - Responsive auto-sizing for Mac and iPad (no scrolling needed)
+  - Responsive auto-sizing for all devices (no scrolling needed)
   - Swipeable pages with navigation arrows
 - **Heatmap View**: Color-coded performance visualization with compact metrics
   - Responsive auto-sizing tiles for all screen sizes
@@ -153,7 +155,13 @@ Interactive filter chips for quick analysis:
 - **Meme Stocks** / **High Volume** (>50M) / **M7 Starred**
 - **BB Squeeze** / **Short Squeeze**
 - **Earnings Week** / **Dividend Payers**
-- **Category Filters** (Major Tech, Leveraged ETF, Sector ETF, Emerging Tech, Speculative/Meme)
+- **Category Filters**:
+  - 🌐 **Tech** - Major technology companies
+  - ⚡ **Leveraged** - Leveraged/inverse ETFs (auto-detected via ticker patterns and names)
+  - 🏦 **ETFs** - Sector/index ETFs (excludes leveraged products)
+  - 🚧 **Emerging Tech** - Nuclear, space, battery, clean energy
+  - 🎲 **Speculative** - Meme stocks and high-risk plays
+  - 💰 **Dividend** - Dividend-paying stocks
 
 ### 📋 Ticker File Management
 Flexible ticker list format with section support:
@@ -189,7 +197,7 @@ Consolidated market overview with all global indexes on a single line:
 - **AAII Sentiment**: Bull/bear spread from investor survey (separate line)
 
 ### 🎨 UI/UX Features
-- **Responsive Design**: Auto-sizing for Mac, iPad, and mobile devices
+- **Responsive Design**: Auto-sizing for all devices and screen sizes
   - Card view: tiles adapt from 280px to 350px based on viewport
   - Heatmap view: tiles adapt from 180px to 220px based on viewport
   - No horizontal or vertical scrolling required
@@ -371,7 +379,8 @@ Alert banner displays at top with color-coded hearts:
 - `stocks.py` - Main dashboard generator
 - `data/tickers.csv` - Tracked ticker symbols
 - `data/alerts.json` - Custom alert definitions
-- `data/*_dashboard.html` - Generated dashboard files
+- `data/dashboard.html` - Generated dashboard (auto-detects market hours)
+- `.github/workflows/build.yml` - Automated updates (4 AM - 5 PM PST, every 30 min)
 
 ## Performance
 
@@ -433,30 +442,35 @@ python3 stocks.py data/tickers.csv
 
 4. **Wait for completion** - The script will:
    - Fetch data for all tickers in parallel
+   - Auto-detect current market hours (regular vs extended)
    - Calculate technical indicators and trading signals
-   - Generate both regular and extended hours dashboards
+   - Generate dashboard with appropriate data for the session
    - Display execution time in minutes
 
-5. **View the dashboards** - Open the generated HTML files:
-   - `data/reg_dashboard.html` - Regular trading hours data
-   - `data/extnd_dashboard.html` - Extended hours data
+5. **View the dashboard** - Open the generated HTML file:
+   - `data/dashboard.html` - Automatically shows regular or extended hours data based on when it was run
    
    Or open directly in browser:
    ```bash
-   open data/reg_dashboard.html
+   open data/dashboard.html
    ```
 
 ### Output
 
 The script generates:
-- `data/reg_dashboard.html` - Regular hours dashboard
-- `data/extnd_dashboard.html` - Extended hours dashboard
+- `data/dashboard.html` - Single dashboard file with auto-detected market hours data
 - Console output with execution time:
   ```
-  ✓ Regular Hours Dashboard generated: data/reg_dashboard.html (took 2.34 minutes)
-  ✓ Extended Hours Dashboard generated: data/extnd_dashboard.html (took 2.41 minutes)
-  Total execution time: 4.75 minutes
+  ✓ Dashboard generated: data/dashboard.html (took 2.34 minutes)
+  
+  ⏱️  Total time: 2.34 minutes
   ```
+
+**Market Hours Detection:**
+- The dashboard automatically determines if it's regular hours (9:30 AM - 4:00 PM ET, Mon-Fri)
+- During regular hours: Fetches regular market data (no badge shown)
+- Outside regular hours: Fetches extended hours data (shows "Extended Hours" badge)
+- GitHub Actions workflow runs every 30 minutes from 4 AM - 5 PM PST on weekdays
 
 ### Ticker File Format
 `data/tickers.csv` - One ticker per line (newline or comma-separated):
@@ -544,13 +558,82 @@ export RISK_PER_TRADE=2.0           # % of account to risk per trade (default: 2
   - Risk/Reward: 5% / 10% (1:2)
 
 ### Custom Alerts
-Create `data/alerts.json` for custom alert conditions:
+Create `data/alerts.json` to define custom alert conditions for specific tickers. The system supports multiple alert types:
+
+**Available Alert Conditions:**
+
+1. **Price Thresholds:**
+   - `price_above` - Alert when price exceeds a specific value
+   - `price_below` - Alert when price falls below a specific value
+
+2. **Daily Price Changes:**
+   - `day_change_above` - Alert when daily % change exceeds a threshold
+   - `day_change_below` - Alert when daily % change falls below a threshold
+
+3. **RSI Levels:**
+   - `rsi_oversold` - Alert when RSI drops below 30 (oversold)
+   - `rsi_overbought` - Alert when RSI rises above 70 (overbought)
+
+4. **Volume Activity:**
+   - `volume_spike` - Alert when volume exceeds 150% of average
+
+5. **Trading Signals:**
+   - `buy` - Alert on BUY signals from active strategy
+   - `sell` - Alert on SELL signals from active strategy
+   - `short` - Alert on SHORT signals from active strategy
+
+**Example `data/alerts.json`:**
 ```json
 [
   {
     "ticker": "AAPL",
     "condition": "price_above",
     "value": 200
+  },
+  {
+    "ticker": "TSLA",
+    "condition": "price_below",
+    "value": 150
+  },
+  {
+    "ticker": "NVDA",
+    "condition": "day_change_above",
+    "value": 5
+  },
+  {
+    "ticker": "AMD",
+    "condition": "day_change_below",
+    "value": -3
+  },
+  {
+    "ticker": "GOOGL",
+    "condition": "rsi_oversold"
+  },
+  {
+    "ticker": "MSFT",
+    "condition": "rsi_overbought"
+  },
+  {
+    "ticker": "META",
+    "condition": "volume_spike"
+  },
+  {
+    "ticker": "AMZN",
+    "condition": "buy"
+  },
+  {
+    "ticker": "SPY",
+    "condition": "sell"
+  },
+  {
+    "ticker": "QQQ",
+    "condition": "short"
   }
 ]
 ```
+
+**Notes:**
+- Price and percentage conditions require a `value` field
+- RSI, volume, and signal conditions do not require a `value`
+- Alerts appear in the banner at the top of the dashboard
+- Custom alerts are cached for 30 minutes to improve performance

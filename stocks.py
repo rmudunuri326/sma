@@ -85,6 +85,18 @@ import threading
 ALERTS_FILE = "data/alerts.json"
 UTC = pytz.utc
 PST = pytz.timezone("America/Los_Angeles")
+ET = pytz.timezone("America/New_York")
+
+def is_regular_hours():
+    """Check if current time is during regular market hours (9:30 AM - 4:00 PM ET, Mon-Fri)"""
+    now_et = datetime.now(ET)
+    # Check if it's a weekday
+    if now_et.weekday() >= 5:  # Saturday or Sunday
+        return False
+    # Check if time is between 9:30 AM and 4:00 PM ET
+    market_open = now_et.replace(hour=9, minute=30, second=0, microsecond=0)
+    market_close = now_et.replace(hour=16, minute=0, second=0, microsecond=0)
+    return market_open <= now_et <= market_close
 
 # Performance and API Configuration Constants
 MAX_WORKERS = 5  # Maximum thread pool workers for parallel ticker fetching
@@ -147,9 +159,19 @@ def infer_category_from_info(ticker, info):
 
     # Detect leveraged/inverse ETFs via quoteType or naming
     if qtype == "etf" or "etf" in lname or "etf" in sname:
+        ticker_lower = tu.lower()
+        
+        # Explicitly exclude common non-leveraged ETFs to prevent false positives
+        non_leveraged_tickers = {'spy', 'qqq', 'dia', 'iwm', 'voo', 'vti', 'xlf', 'xle', 
+                                'xlk', 'xlv', 'xlu', 'xli', 'xlc', 'xlp', 'xlb', 'xly',
+                                'smh', 'xbi', 'iyr', 'gld', 'slv', 'uso'}
+        if ticker_lower in non_leveraged_tickers:
+            return "sector-etf"
+        
         lever_markers = (
             "3x",
             "2x",
+            "1.5x",
             "ultra",
             "ultrapro",
             "leveraged",
@@ -157,12 +179,28 @@ def infer_category_from_info(ticker, info):
             "-1x",
             "-2x",
             "-3x",
+            "short",
+            "double",
+            "triple",
         )
-        if (
-            any(m in tu.lower() for m in ("3x", "2x", "ultra", "pro", "bull", "bear"))
-            or any(m in lname for m in lever_markers)
+        
+        # Check specific leveraged ticker patterns (must be 4+ chars and match specific patterns)
+        # TQQQ, SQQQ (4 chars ending with qqq), SPXL, TECL (4 chars ending with xl)
+        # SPXS, TECS (4 chars ending with xs)
+        is_leveraged_ticker = (
+            (len(tu) == 4 and ticker_lower.endswith('qqq'))  # TQQQ, SQQQ (not QQQ which is 3)
+            or (len(tu) == 4 and ticker_lower.endswith('xl'))  # SPXL, TECL (not XL_ sector ETFs which are 3)
+            or (len(tu) == 4 and ticker_lower.endswith('xs'))  # SPXS, TECS
+            or any(m in ticker_lower for m in ("3x", "2x", "ultra", "bull", "bear"))
+        )
+        # Check name/description for leverage indicators
+        is_leveraged_name = (
+            any(m in lname for m in lever_markers)
             or any(m in sname for m in lever_markers)
-        ):
+            or any(x in lname.lower() for x in ("bear ", "bull ", " 2x", " 3x", "daily ", "inverse", "leveraged"))
+        )
+        
+        if is_leveraged_ticker or is_leveraged_name:
             return "leveraged-etf"
         return "sector-etf"
 
@@ -1483,11 +1521,11 @@ def fetch(ticker, ext=False, retry=0):
     except Exception as e:
         error_msg = str(e)
         if "Too Many Requests" in error_msg or "Rate limit" in error_msg:
-            if retry < max_retries:
+            if retry < MAX_RETRIES:
                 # exponential backoff with jitter
                 wait_time = (2**retry) * 5 + random.uniform(0, 3)
                 print(
-                    f"{ticker}: Rate limited, waiting {wait_time:.1f}s (retry {retry+1}/{max_retries})"
+                    f"{ticker}: Rate limited, waiting {wait_time:.1f}s (retry {retry+1}/{MAX_RETRIES})"
                 )
                 time.sleep(wait_time)
                 return fetch(ticker, ext, retry + 1)
@@ -1667,10 +1705,15 @@ def load_ticker_sections(csv="data/tickers.csv"):
         return ["AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "TSLA", "META", "SPY"], [], []
 
 
-def dashboard(csv="data/tickers.csv", ext=False):
+def dashboard(csv="data/tickers.csv", ext=None):
+    """Generate dashboard data. If ext=None, auto-detect based on current market hours."""
     os.makedirs("data", exist_ok=True)
     tickers, meme_list, m7_list = load_ticker_sections(csv)
 
+    # Auto-detect if not explicitly specified
+    if ext is None:
+        ext = not is_regular_hours()  # Extended hours when NOT in regular hours
+    
     data = []
     # Adaptive worker count: Increased from 3 to 5 for better parallelization
     # Rate limiter prevents overwhelming the API
@@ -1934,7 +1977,11 @@ def html(df, vix, fg, aaii, file, ext=False, alerts=None):
         aaii_h = f'<span class="{cls}">AAII: Bull {aaii["bullish"]:.1f}% Bear {aaii["bearish"]:.1f}%</span>'
 
     html = f"""<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Dashboard</title>
-<meta name="viewport" content="width=device-width,initial-scale=1"><style>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
+<style>
 @import url('https://fonts.googleapis.com/css2?family=Oracle+Sans:wght@400;500;600;700&display=swap');
 :root{{ --bg:#f5f7fa; --card:#ffffff; --text:#312d2a; --border:#d6dbe0; --accent:#0572ce; --accent-hover:#0460b2; --accent-dark:#024a87; --pos:#20813e; --neg:#c74634; --bullish:#20813e; --bearish:#c74634; --surface:#fafbfc; --shadow:0 1px 3px 0 rgba(0,0,0,0.08), 0 1px 2px 0 rgba(0,0,0,0.06); --shadow-hover:0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06); --shadow-lg:0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -2px rgba(0,0,0,0.05); --radius-sm:4px; --radius-md:6px; --radius-lg:8px }}
 [data-theme="dark"]{{ --bg:#1b1f24; --card:#272c33; --text:#e8ecef; --border:#3d4349; --accent:#1f8ffa; --accent-hover:#4da3fb; --accent-dark:#0572ce; --pos:#3eb878; --neg:#e0604f; --bullish:#3eb878; --bearish:#e0604f; --surface:#21262b; --shadow:0 1px 3px 0 rgba(0,0,0,0.2), 0 1px 2px 0 rgba(0,0,0,0.12) }}
@@ -2036,13 +2083,6 @@ tr:hover td{{background:var(--surface)}}
 .range-labels{{display:flex;justify-content:space-between;font-size:0.75em;margin-top:4px;color:var(--text);opacity:0.8}}
 .range-container{{margin:10px 0}}
 .range-title{{font-size:0.75em;font-weight:600;margin-bottom:4px;color:var(--text);opacity:0.9}}
-.toggle-switch{{position:relative;display:inline-block;width:48px;height:26px}}
-.toggle-switch input{{opacity:0;width:0;height:0}}
-.toggle-slider{{position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;background:var(--border);transition:all 0.3s;border-radius:26px;box-shadow:inset 0 1px 2px rgba(0,0,0,0.1)}}
-.toggle-slider:before{{position:absolute;content:"";height:20px;width:20px;left:3px;bottom:3px;background:#fff;transition:all 0.3s;border-radius:50%;box-shadow:0 2px 4px rgba(0,0,0,0.2)}}
-input:checked + .toggle-slider{{background:var(--accent)}}
-input:checked + .toggle-slider:before{{transform:translateX(22px)}}
-.hours-toggle{{display:flex;align-items:center;gap:12px;font-weight:600;margin-left:20px}}
 input#tickerFilter{{padding:6px 10px;border:1.5px solid var(--border);border-radius:var(--radius-md);background:var(--card);color:var(--text);font-size:13px;font-family:'Oracle Sans',-apple-system,sans-serif;transition:all 0.2s;outline:none;margin-left:auto;min-width:180px}}
 input#tickerFilter:hover{{border-color:var(--accent)}}
 input#tickerFilter:focus{{border-color:var(--accent);box-shadow:0 0 0 3px rgba(5,114,206,0.1)}}
@@ -2072,13 +2112,8 @@ input#tickerFilter:focus{{border-color:var(--accent);box-shadow:0 0 0 3px rgba(5
 
 <div class="controls-container">
 <div class="hours-toggle-container" style="display:flex;gap:15px;flex-wrap:wrap;align-items:center;justify-content:space-between">
-<div class="hours-toggle">
-<span>Regular</span>
-<label class="toggle-switch">
-<input type="checkbox" {'checked' if ext else ''} onchange="toggleHours(this.checked)">
-<span class="toggle-slider"></span>
-</label>
-<span>Extended</span>
+<div style="display:flex;align-items:center;gap:8px;font-weight:600;font-size:14px;color:var(--text)">
+{'<span style="background:var(--accent);color:#fff;padding:4px 12px;border-radius:var(--radius-md);box-shadow:var(--shadow)">Extended Hours</span>' if ext else ''}
 </div>
 <div style="display:flex;gap:10px">
 <button class="btn" onclick="toggleTheme()">🌓</button>
@@ -2099,11 +2134,11 @@ input#tickerFilter:focus{{border-color:var(--accent);box-shadow:0 0 0 3px rgba(5
 <div class="chip" data-filter="overbought">📈 Overbought</div>
 <div class="chip" data-filter="surge">🚀 Surge</div>
 <div class="chip" data-filter="crash">💥 Crash</div>
-<div class="chip" data-filter="dividend">💰 Dividend</div>
 <div class="chip" data-filter="cat-major-tech">🌐 Tech</div>
 <div class="chip" data-filter="cat-leveraged-etf">⚡ Leveraged</div>
 <div class="chip" data-filter="cat-sector-etf">🏦 ETFs</div>
 <div class="chip" data-filter="cat-emerging-tech">🚧 Emerging Tech</div>
+<div class="chip" data-filter="dividend">💰 Dividend</div>
 <div class="chip" data-filter="cat-spec-meme">🎲 Speculative</div>
 <div class="chip" data-filter="squeeze">🔥 Squeeze</div>
 <div class="chip" data-filter="bb-squeeze">📏 BB Squeeze</div>
@@ -2893,12 +2928,6 @@ function setView(btn, view) {
     }
 }
 
-function toggleHours(extended) {
-    const newFile = extended ? 'extnd_dashboard.html' : 'reg_dashboard.html';
-    if (window.location.pathname.endsWith(newFile)) return;
-    window.location.href = newFile;
-}
-
 let currentFilter = 'all';
 function applyFilter() {
     const rows = document.querySelectorAll('.stock-row');
@@ -3143,27 +3172,35 @@ if __name__ == "__main__":
     parser.add_argument("csv_file", nargs="?", default="data/tickers.csv")
     args = parser.parse_args()
 
-    for ext, file, name in [
-        (False, "data/reg_dashboard.html", "Regular"),
-        (True, "data/extnd_dashboard.html", "Extended"),
-    ]:
-        try:
-            dashboard_start = time_module.time()
-            df = dashboard(args.csv_file, ext)
-            alerts = check_alerts(df.to_dict("records"))
-            html(
-                df,
-                get_vix_data(),
-                get_fear_greed_data(),
-                get_aaii_sentiment(),
-                file,
-                ext,
-                alerts=alerts,
-            )
-            dashboard_elapsed = time_module.time() - dashboard_start
-            print(f"✓ {name} Hours Dashboard generated: {file} (took {dashboard_elapsed / 60:.2f} minutes)")
-        except Exception as e:
-            print(f"✗ {name} failed: {e}")
+    try:
+        dashboard_start = time_module.time()
+        # Auto-detect market hours (None = auto-detect)
+        df = dashboard(args.csv_file, ext=None)
+        ext = not is_regular_hours()  # Determine which session we're in
+        file = "data/dashboard.html"
+        
+        # Clean up old dashboard files if they exist
+        for old_file in ["data/reg_dashboard.html", "data/extnd_dashboard.html"]:
+            if os.path.exists(old_file):
+                try:
+                    os.remove(old_file)
+                except Exception:
+                    pass
+        
+        alerts = check_alerts(df.to_dict("records"))
+        html(
+            df,
+            get_vix_data(),
+            get_fear_greed_data(),
+            get_aaii_sentiment(),
+            file,
+            ext,
+            alerts=alerts,
+        )
+        dashboard_elapsed = time_module.time() - dashboard_start
+        print(f"✓ Dashboard generated: {file} (took {dashboard_elapsed / 60:.2f} minutes)")
+    except Exception as e:
+        print(f"✗ Dashboard generation failed: {e}")
     
     total_elapsed = time_module.time() - start_time
     print(f"\n⏱️  Total time: {total_elapsed / 60:.2f} minutes")
