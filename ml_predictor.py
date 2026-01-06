@@ -45,6 +45,69 @@ MODEL_DIR = Path("data/ml_models")
 MODEL_FILE = MODEL_DIR / "breakout_crash_model.pkl"
 SCALER_FILE = MODEL_DIR / "feature_scaler.pkl"
 
+# Data caching for efficiency
+DATA_CACHE_DIR = Path("data/stock_cache")
+DATA_CACHE_DIR.mkdir(exist_ok=True)
+
+
+def load_or_fetch_stock_data(ticker, force_refresh=False):
+    """
+    Smart data loading: Use cached data when available, only fetch new data.
+    Returns up to 2 years of historical data.
+    """
+    cache_file = DATA_CACHE_DIR / f"{ticker}.pkl"
+
+    if cache_file.exists() and not force_refresh:
+        try:
+            # Load cached data
+            cached_data = pd.read_pickle(cache_file)
+            last_date = cached_data.index.max()
+
+            # Check if we need to update (fetch data from last cached date to today)
+            days_since_update = (pd.Timestamp.now() - last_date).days
+
+            if days_since_update < 7:  # Data is fresh enough (less than 1 week old)
+                print(f"  📂 Using cached data for {ticker} (last updated: {last_date.date()})")
+                return cached_data
+
+            # Fetch only new data since last cache
+            print(f"  🔄 Updating {ticker} data (last: {last_date.date()})...")
+            try:
+                new_data = yf.Ticker(ticker).history(start=last_date + pd.Timedelta(days=1))
+                if not new_data.empty:
+                    # Combine cached + new data
+                    combined_data = pd.concat([cached_data, new_data])
+                    # Keep only last 2 years
+                    cutoff_date = pd.Timestamp.now() - pd.DateOffset(years=2)
+                    combined_data = combined_data[combined_data.index >= cutoff_date]
+
+                    # Save updated cache
+                    combined_data.to_pickle(cache_file)
+                    print(f"  💾 Updated cache for {ticker} ({len(new_data)} new days)")
+                    return combined_data
+                else:
+                    print(f"  📂 No new data for {ticker}, using cache")
+                    return cached_data
+
+            except Exception as e:
+                print(f"  ⚠️  Failed to update {ticker}: {e}, using cache")
+                return cached_data
+
+        except Exception as e:
+            print(f"  ⚠️  Failed to load cache for {ticker}: {e}, fetching fresh data")
+
+    # Fetch fresh data (first time or cache failed)
+    print(f"  📥 Fetching fresh data for {ticker}...")
+    try:
+        stock_data = yf.Ticker(ticker).history(period="2y", auto_adjust=False)
+        if not stock_data.empty:
+            stock_data.to_pickle(cache_file)
+            print(f"  💾 Cached data for {ticker} ({len(stock_data)} days)")
+        return stock_data
+    except Exception as e:
+        print(f"  ❌ Failed to fetch data for {ticker}: {e}")
+        return pd.DataFrame()
+
 
 def extract_features(stock_data):
     """
@@ -400,7 +463,7 @@ if __name__ == "__main__":
         for i, ticker in enumerate(tickers):
             print(f"Processing {ticker} ({i+1}/{len(tickers)})...")
             try:
-                stock_hist = yf.Ticker(ticker).history(period="2y", auto_adjust=False)
+                stock_hist = load_or_fetch_stock_data(ticker)
                 if len(stock_hist) < 252: # Need at least 1 year of data
                     continue
 

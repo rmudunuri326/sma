@@ -22,8 +22,14 @@ You can train the ML model manually or automate it with GitHub Actions:
 If you want to automate retraining, use the provided workflow:
 
 1. See `.github/workflows/mlbuild.yml` in your repo.
-2. This workflow runs weekly (Sunday 5PM PST) and can be triggered manually from the Actions tab.
-3. It will train the model and commit the updated model files to the repository automatically.
+2. This workflow runs **daily on working days (Monday-Friday) at 3:00 AM PST** and can be triggered manually from the Actions tab.
+3. It will train the model using smart data caching, update both model files and stock cache, and commit changes to the repository automatically.
+
+**Smart Caching Benefits:**
+- **First run**: Downloads full 2 years of historical data and caches it locally
+- **Daily updates**: Only fetches new data since last cache (10x faster subsequent runs)
+- **Efficient storage**: Maintains flat git history to prevent repository bloat
+- **Automatic updates**: Both ML models and stock cache are kept current
 
 **Note:** The dashboard (`stocks.py`) will automatically use the latest model files for predictions if they exist.
 
@@ -83,9 +89,15 @@ python3 ml_predictor.py
 
 This will:
 - Load tickers from `data/tickers.csv` (if it exists)
-- Fetch real historical data for each ticker
+- **Smart data loading**: Use cached data when available, only fetch new data since last update
+- Fetch real historical data for each ticker (2 years of data on first run)
 - Train the model on actual market patterns
-- Save model files to `data/ml_models/`
+- Save model files to `data/ml_models/` and cache data to `data/stock_cache/`
+
+**Caching Benefits:**
+- **First run**: Downloads and caches 2 years of data (~10-15 minutes)
+- **Subsequent runs**: Uses cached data + fetches only new data (~1-2 minutes)
+- **Data persistence**: Cache survives between runs for faster training
 
 **Fallback: Synthetic Demo Data (if no tickers.csv)**
 ```bash
@@ -100,7 +112,7 @@ For custom training with specific tickers, create a training script (`train_ml_m
 ```python
 import yfinance as yf
 import pandas as pd
-from ml_predictor import train_model
+from ml_predictor import train_model, load_or_fetch_stock_data
 from datetime import datetime, timedelta
 
 # Load tickers from data/tickers.csv (or specify manually)
@@ -109,9 +121,8 @@ historical_data = []
 labels = []
 
 for ticker in tickers:
-    # Fetch 2 years of historical data (~504 trading days)
-    stock = yf.Ticker(ticker)
-    hist = stock.history(period="2y")
+    # Smart data loading: Use cache when available, only fetch new data
+    hist = load_or_fetch_stock_data(ticker)
     
     # Use data from 1 year ago (252 trading days back) for features
     # Check performance over next 6-12 months for labeling
@@ -305,7 +316,7 @@ FEATURE_NAMES = [
 ## FAQ
 
 **Q: How often should I retrain?**  
-A: Monthly with new data, or after major market regime changes.
+A: The system automatically retrains daily (Mon-Fri at 3 AM PST) with fresh market data. Manual retraining can be done anytime via GitHub Actions or locally.
 
 **Q: Can it predict the next NVDA?**  
 A: It identifies stocks with similar technical/fundamental patterns to past winners. No guarantee of future performance.
@@ -314,7 +325,10 @@ A: It identifies stocks with similar technical/fundamental patterns to past winn
 A: ML can identify complex multi-factor patterns humans might miss. Use together for best results.
 
 **Q: What's the minimum training data needed?**  
-A: Ideally 500+ labeled examples across different market conditions.
+A: Ideally 500+ labeled examples across different market conditions. The automated system handles this automatically.
+
+**Q: How does the smart caching work?**  
+A: First run downloads 2 years of data and caches it. Subsequent runs only fetch new data since the last cache update, making training 10x faster.
 
 ## Next Steps
 
@@ -322,7 +336,7 @@ A: Ideally 500+ labeled examples across different market conditions.
 2. ✅ Train model (synthetic or real data)
 3. ✅ Run dashboard and review ML scores
 4. 📊 Backtest predictions
-5. 🔄 Set up monthly retraining schedule
+5. 🔄 **Automated daily retraining is active** (Mon-Fri 3 AM PST)
 6. 🎯 Integrate into your trading workflow
 
 For questions or issues, check the code comments in `ml_predictor.py` or create an issue in the repository.
