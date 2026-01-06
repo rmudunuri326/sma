@@ -15,11 +15,18 @@ Features used (28 technical + fundamental indicators):
 - Squeeze: Squeeze levels
 - Signals/Trend: Active signals, Trend scores
 
+Historical Performance Tracking:
+- Tracks prediction accuracy over time
+- Calculates win rates for breakout/crash predictions
+- Provides expected returns when signals trigger
+- Updates performance metrics with each prediction
+
 Usage:
     from ml_predictor import predict_breakout_crash
 
     scores = predict_breakout_crash(stock_data)
-    # Returns: {'breakout_score': 0-100, 'crash_risk': 0-100, 'prediction': str, 'confidence': 0-100}
+    # Returns: {'breakout_score': 0-100, 'crash_risk': 0-100, 'prediction': str, 'confidence': 0-100,
+    #           'historical_win_rate': 0-100, 'expected_return': float, 'sample_size': int}
 """
 from __future__ import annotations
 
@@ -63,10 +70,195 @@ logger = logging.getLogger(__name__)
 MODEL_DIR = Path("data/ml_models")
 MODEL_FILE = MODEL_DIR / "breakout_crash_model.pkl"
 SCALER_FILE = MODEL_DIR / "feature_scaler.pkl"
+PERFORMANCE_FILE = MODEL_DIR / "prediction_performance.pkl"
 
 # Data caching for efficiency
 DATA_CACHE_DIR = Path("data/stock_cache")
 DATA_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
+
+class PredictionPerformanceTracker:
+    """
+    Tracks historical predictions and their outcomes to calculate performance metrics.
+    
+    Stores predictions with timestamps and tracks their actual performance over time.
+    Provides win rates, expected returns, and confidence intervals.
+    """
+    
+    def __init__(self):
+        self.performance_data = self._load_performance_data()
+        
+    def _load_performance_data(self) -> Dict[str, Any]:
+        """Load historical performance data from disk."""
+        if PERFORMANCE_FILE.exists():
+            try:
+                with open(PERFORMANCE_FILE, "rb") as f:
+                    return pickle.load(f)
+            except Exception as e:
+                logger.warning(f"Failed to load performance data: {e}")
+        
+        # Initialize empty performance data
+        return {
+            "predictions": [],  # List of prediction records
+            "last_updated": None,
+            "metrics": {
+                "breakout_win_rate": 0.0,
+                "crash_win_rate": 0.0,
+                "avg_breakout_return": 0.0,
+                "avg_crash_return": 0.0,
+                "total_predictions": 0,
+                "breakout_predictions": 0,
+                "crash_predictions": 0,
+            }
+        }
+    
+    def _save_performance_data(self):
+        """Save performance data to disk."""
+        try:
+            with open(PERFORMANCE_FILE, "wb") as f:
+                pickle.dump(self.performance_data, f)
+        except Exception as e:
+            logger.warning(f"Failed to save performance data: {e}")
+    
+    def record_prediction(self, ticker: str, prediction: str, confidence: int, 
+                         breakout_score: int, crash_risk: int, current_price: float):
+        """
+        Record a new prediction for tracking.
+        
+        Args:
+            ticker: Stock ticker
+            prediction: BREAKOUT, CRASH, or NEUTRAL
+            confidence: Model confidence 0-100
+            breakout_score: Breakout probability 0-100
+            crash_risk: Crash risk probability 0-100
+            current_price: Current stock price
+        """
+        prediction_record = {
+            "ticker": ticker,
+            "prediction": prediction,
+            "confidence": confidence,
+            "breakout_score": breakout_score,
+            "crash_risk": crash_risk,
+            "entry_price": current_price,
+            "timestamp": pd.Timestamp.now(),
+            "outcome_price": None,  # Will be filled when outcome is known
+            "outcome_date": None,
+            "actual_return": None,
+            "outcome_determined": False,
+        }
+        
+        self.performance_data["predictions"].append(prediction_record)
+        self._update_metrics()
+        self._save_performance_data()
+    
+    def update_outcomes(self):
+        """
+        Update prediction outcomes by checking current prices.
+        This should be called periodically to track performance.
+        """
+        updated = False
+        
+        for prediction in self.performance_data["predictions"]:
+            if prediction["outcome_determined"]:
+                continue
+                
+            # Check if enough time has passed (6 months minimum)
+            days_since_prediction = (pd.Timestamp.now() - prediction["timestamp"]).days
+            
+            if days_since_prediction < 180:  # 6 months
+                continue
+                
+            try:
+                # Get current price
+                import yfinance as yf
+                ticker_data = yf.Ticker(prediction["ticker"]).history(period="1d")
+                
+                if not ticker_data.empty and "Close" in ticker_data.columns and len(ticker_data) > 0:
+                    current_price = ticker_data["Close"].iloc[-1]
+                    actual_return = (current_price - prediction["entry_price"]) / prediction["entry_price"] * 100
+                    
+                    prediction["outcome_price"] = current_price
+                    prediction["outcome_date"] = pd.Timestamp.now()
+                    prediction["actual_return"] = actual_return
+                    prediction["outcome_determined"] = True
+                    updated = True
+                    
+            except Exception as e:
+                logger.debug(f"Could not update outcome for {prediction['ticker']}: {e}")
+        
+        if updated:
+            self._update_metrics()
+            self._save_performance_data()
+    
+    def _update_metrics(self):
+        """Calculate and update performance metrics."""
+        predictions = self.performance_data["predictions"]
+        
+        if not predictions:
+            return
+            
+        # Separate by prediction type
+        breakout_preds = [p for p in predictions if p["prediction"] == "BREAKOUT" and p["outcome_determined"]]
+        crash_preds = [p for p in predictions if p["prediction"] == "CRASH" and p["outcome_determined"]]
+        
+        # Calculate win rates and returns
+        breakout_wins = sum(1 for p in breakout_preds if p["actual_return"] > 50)  # >50% gain = win
+        crash_wins = sum(1 for p in crash_preds if p["actual_return"] < -30)     # >30% loss = win
+        
+        breakout_win_rate = (breakout_wins / len(breakout_preds) * 100) if breakout_preds else 0.0
+        crash_win_rate = (crash_wins / len(crash_preds) * 100) if crash_preds else 0.0
+        
+        avg_breakout_return = np.mean([p["actual_return"] for p in breakout_preds]) if breakout_preds else 0.0
+        avg_crash_return = np.mean([p["actual_return"] for p in crash_preds]) if crash_preds else 0.0
+        
+        self.performance_data["metrics"] = {
+            "breakout_win_rate": breakout_win_rate,
+            "crash_win_rate": crash_win_rate,
+            "avg_breakout_return": avg_breakout_return,
+            "avg_crash_return": avg_crash_return,
+            "total_predictions": len(predictions),
+            "breakout_predictions": len(breakout_preds),
+            "crash_predictions": len(crash_preds),
+        }
+        
+        self.performance_data["last_updated"] = pd.Timestamp.now()
+    
+    def get_performance_summary(self, prediction_type: str = None) -> Dict[str, Any]:
+        """
+        Get performance summary for predictions.
+        
+        Args:
+            prediction_type: "BREAKOUT", "CRASH", or None for overall
+            
+        Returns:
+            Dictionary with performance metrics
+        """
+        self.update_outcomes()  # Ensure outcomes are up to date
+        
+        if prediction_type == "BREAKOUT":
+            return {
+                "win_rate": self.performance_data["metrics"]["breakout_win_rate"],
+                "expected_return": self.performance_data["metrics"]["avg_breakout_return"],
+                "sample_size": self.performance_data["metrics"]["breakout_predictions"],
+                "description": f"Breakout predictions have been correct {self.performance_data['metrics']['breakout_win_rate']:.1f}% of the time, with average returns of {self.performance_data['metrics']['avg_breakout_return']:.1f}% (based on {self.performance_data['metrics']['breakout_predictions']} predictions)"
+            }
+        elif prediction_type == "CRASH":
+            return {
+                "win_rate": self.performance_data["metrics"]["crash_win_rate"],
+                "expected_return": self.performance_data["metrics"]["avg_crash_return"],
+                "sample_size": self.performance_data["metrics"]["crash_predictions"],
+                "description": f"Crash predictions have been correct {self.performance_data['metrics']['crash_win_rate']:.1f}% of the time, with average returns of {self.performance_data['metrics']['avg_crash_return']:.1f}% (based on {self.performance_data['metrics']['crash_predictions']} predictions)"
+            }
+        else:
+            return {
+                "total_predictions": self.performance_data["metrics"]["total_predictions"],
+                "breakout_performance": self.get_performance_summary("BREAKOUT"),
+                "crash_performance": self.get_performance_summary("CRASH"),
+            }
+
+
+# Global performance tracker instance
+performance_tracker = PredictionPerformanceTracker()
 
 # Model hyperparameters
 MODEL_CONFIG = {
@@ -408,8 +600,11 @@ def predict_breakout_crash(
         Dictionary with:
             - breakout_score: 0-100 (probability of breakout)
             - crash_risk: 0-100 (probability of crash)
-            - prediction: label string
+            - prediction: label string ("BREAKOUT", "CRASH", or "NEUTRAL")
             - confidence: 0-100 (model confidence)
+            - historical_win_rate: 0-100 (historical accuracy for this prediction type)
+            - expected_return: float (average historical return for this prediction type)
+            - sample_size: int (number of historical predictions for this type)
     """
     if not ML_AVAILABLE:
         logger.warning("ML libraries not available - returning default neutral prediction")
@@ -477,11 +672,52 @@ def predict_breakout_crash(
     except Exception:
         prediction = "NEUTRAL"
 
+    # Record prediction in performance tracker
+    ticker = stock_data.get("ticker", "UNKNOWN")
+    current_price = stock_data.get("close", stock_data.get("current_price", 0.0))
+    
+    try:
+        performance_tracker.record_prediction(
+            ticker=ticker,
+            prediction=prediction,
+            confidence=confidence,
+            breakout_score=breakout_score,
+            crash_risk=crash_risk,
+            current_price=current_price
+        )
+    except Exception as e:
+        logger.debug(f"Failed to record prediction for {ticker}: {e}")
+
+    # Get historical performance metrics
+    try:
+        if prediction == "BREAKOUT":
+            perf_summary = performance_tracker.get_performance_summary("BREAKOUT")
+            historical_win_rate = perf_summary["win_rate"]
+            expected_return = perf_summary["expected_return"]
+            sample_size = perf_summary["sample_size"]
+        elif prediction == "CRASH":
+            perf_summary = performance_tracker.get_performance_summary("CRASH")
+            historical_win_rate = perf_summary["win_rate"]
+            expected_return = perf_summary["expected_return"]
+            sample_size = perf_summary["sample_size"]
+        else:
+            historical_win_rate = 0.0
+            expected_return = 0.0
+            sample_size = 0
+    except Exception as e:
+        logger.debug(f"Failed to get performance summary: {e}")
+        historical_win_rate = 0.0
+        expected_return = 0.0
+        sample_size = 0
+
     return {
         "breakout_score": breakout_score,
         "crash_risk": crash_risk,
         "prediction": prediction,
         "confidence": confidence,
+        "historical_win_rate": historical_win_rate,
+        "expected_return": expected_return,
+        "sample_size": sample_size,
     }
 
 
@@ -702,8 +938,13 @@ if __name__ == "__main__":
                         logger.warning(f"  Skipping {ticker}: Too many missing values")
                     continue
 
-                # Use a single-row snapshot from 1 year ago (simplified placeholder)
-                one_year_ago_data = stock_hist.iloc[-252]
+                # Use a single-row snapshot from 1 year ago (or earliest available data)
+                # Check if we have at least 252 days, otherwise use the earliest available data
+                if len(stock_hist) >= 252:
+                    one_year_ago_data = stock_hist.iloc[-252]
+                else:
+                    # For stocks with less than 252 days, use the first available data point
+                    one_year_ago_data = stock_hist.iloc[0]
 
                 # Calculate real technical indicators from historical data
                 # Use the last available data for feature calculation (minimum 100 days)
@@ -727,9 +968,12 @@ if __name__ == "__main__":
                         std = recent_data["Close"].rolling(20).std()
                         upper_bb = sma + (2 * std)
                         lower_bb = sma - (2 * std)
-                        current_price = recent_data["Close"].iloc[-1]
-                        bb_position_pct = ((current_price - lower_bb.iloc[-1]) / (upper_bb.iloc[-1] - lower_bb.iloc[-1])) * 100
-                        bb_width_pct = ((upper_bb.iloc[-1] - lower_bb.iloc[-1]) / sma.iloc[-1]) * 100
+                        
+                        # Check if we have valid BB calculations
+                        if len(upper_bb.dropna()) > 0 and len(lower_bb.dropna()) > 0 and len(sma.dropna()) > 0:
+                            current_price = recent_data["Close"].iloc[-1]
+                            bb_position_pct = ((current_price - lower_bb.iloc[-1]) / (upper_bb.iloc[-1] - lower_bb.iloc[-1])) * 100
+                            bb_width_pct = ((upper_bb.iloc[-1] - lower_bb.iloc[-1]) / sma.iloc[-1]) * 100
                     
                     # Calculate Stochastic Oscillator
                     stoch_k = stoch_d = 50.0
@@ -737,9 +981,12 @@ if __name__ == "__main__":
                         low_14 = recent_data["Low"].rolling(14).min()
                         high_14 = recent_data["High"].rolling(14).max()
                         k = ((recent_data["Close"] - low_14) / (high_14 - low_14)) * 100
-                        stoch_k = k.iloc[-1]
-                        if len(k) >= 3:
-                            stoch_d = k.rolling(3).mean().iloc[-1]
+                        
+                        # Check if we have valid stochastic calculations
+                        if len(k.dropna()) > 0:
+                            stoch_k = k.iloc[-1]
+                            if len(k.dropna()) >= 3:
+                                stoch_d = k.rolling(3).mean().iloc[-1]
                     
                     # Calculate ATR (Average True Range)
                     atr_val = 0.0
@@ -751,7 +998,11 @@ if __name__ == "__main__":
                         tr2 = (high - close.shift(1)).abs()
                         tr3 = (low - close.shift(1)).abs()
                         tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-                        atr_val = tr.rolling(14).mean().iloc[-1]
+                        
+                        # Check if we have valid ATR calculations
+                        atr_series = tr.rolling(14).mean()
+                        if len(atr_series.dropna()) > 0:
+                            atr_val = atr_series.iloc[-1]
                     
                     # Calculate OBV (On-Balance Volume)
                     obv_val = 0.0
@@ -765,7 +1016,10 @@ if __name__ == "__main__":
                                 obv.iloc[i] = obv.iloc[i-1] - recent_data["Volume"].iloc[i]
                             else:
                                 obv.iloc[i] = obv.iloc[i-1]
-                        obv_val = obv.iloc[-1]
+                        
+                        # Check if OBV calculation was successful
+                        if len(obv.dropna()) > 0:
+                            obv_val = obv.iloc[-1]
                     
                 except ImportError:
                     # Fallback to defaults if stocks.py not available
@@ -778,8 +1032,8 @@ if __name__ == "__main__":
                     atr_val = 0.0
                     obv_val = 0.0
                 
-                # Calculate price changes
-                current_price = recent_data["Close"].iloc[-1]
+                # Calculate price changes with proper bounds checking
+                current_price = recent_data["Close"].iloc[-1] if len(recent_data) > 0 else 0
                 change_pct = ((current_price - recent_data["Close"].iloc[-2]) / recent_data["Close"].iloc[-2]) * 100 if len(recent_data) >= 2 else 0
                 change_5d = ((current_price - recent_data["Close"].iloc[-6]) / recent_data["Close"].iloc[-6]) * 100 if len(recent_data) >= 6 else 0
                 
@@ -802,10 +1056,12 @@ if __name__ == "__main__":
                 volume_bias = 0.0
                 volume_spike = False
                 if len(recent_data) >= 20:
-                    avg_volume = recent_data["Volume"].rolling(20).mean().iloc[-1]
-                    current_volume = recent_data["Volume"].iloc[-1]
-                    volume_bias = ((current_volume - avg_volume) / avg_volume) * 100
-                    volume_spike = current_volume > avg_volume * 2  # 2x average volume
+                    avg_volume_series = recent_data["Volume"].rolling(20).mean()
+                    if len(avg_volume_series.dropna()) > 0:
+                        avg_volume = avg_volume_series.iloc[-1]
+                        current_volume = recent_data["Volume"].iloc[-1]
+                        volume_bias = ((current_volume - avg_volume) / avg_volume) * 100
+                        volume_spike = current_volume > avg_volume * 2  # 2x average volume
                 
                 features = {
                     "rsi": rsi_val,
@@ -841,11 +1097,11 @@ if __name__ == "__main__":
 
                 # Improved labeling logic based on multiple criteria
                 try:
-                    # Get price data points
+                    # Get price data points with bounds checking
                     initial_price = one_year_ago_data["Close"]
                     future_price_3m = stock_hist.iloc[-189]["Close"] if len(stock_hist) > 189 else initial_price  # 3 months
                     future_price_6m = stock_hist.iloc[-126]["Close"] if len(stock_hist) > 126 else initial_price  # 6 months  
-                    future_price_12m = stock_hist.iloc[-1]["Close"]  # 12 months
+                    future_price_12m = stock_hist.iloc[-1]["Close"] if len(stock_hist) > 0 else initial_price  # 12 months
                     
                     # Calculate returns
                     return_3m = (future_price_3m - initial_price) / initial_price

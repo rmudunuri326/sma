@@ -712,10 +712,21 @@ def check_alerts(data):
         # ML Breakout and Crash alerts
         ml_score = s.get("ml_breakout_score", 0)
         ml_crash_risk = s.get("ml_crash_risk", 0)
+        ml_win_rate = s.get("ml_historical_win_rate", 0)
+        ml_expected_return = s.get("ml_expected_return", 0)
+        ml_sample_size = s.get("ml_sample_size", 0)
+        
         if ml_score >= 70:
             ml_breakout.append({"ticker": s["ticker"], "msg": f"ML BREAKOUT {ml_score:.0f}%"})
         if ml_crash_risk >= 50:
             ml_crash.append({"ticker": s["ticker"], "msg": f"ML CRASH RISK {ml_crash_risk:.0f}%"})
+        
+        # Historical performance alerts (high confidence predictions with good track record)
+        if ml_win_rate >= 70 and ml_sample_size >= 5:
+            if ml_score >= 70:
+                ml_breakout.append({"ticker": s["ticker"], "msg": f"ML BREAKOUT {ml_win_rate:.0f}% win rate ({ml_sample_size} trades)"})
+            if ml_crash_risk >= 50:
+                ml_crash.append({"ticker": s["ticker"], "msg": f"ML CRASH {ml_win_rate:.0f}% win rate ({ml_sample_size} trades)"})
 
     def fmt(items, emoji, label):
         return (
@@ -1641,16 +1652,25 @@ def fetch(ticker, ext=False, retry=0):
                 result["ml_crash_risk"] = ml_pred['crash_risk']
                 result["ml_prediction"] = ml_pred['prediction']
                 result["ml_confidence"] = ml_pred['confidence']
+                result["ml_historical_win_rate"] = ml_pred.get('historical_win_rate', 0.0)
+                result["ml_expected_return"] = ml_pred.get('expected_return', 0.0)
+                result["ml_sample_size"] = ml_pred.get('sample_size', 0)
             except Exception as e:
                 result["ml_breakout_score"] = 0
                 result["ml_crash_risk"] = 0
                 result["ml_prediction"] = "N/A"
                 result["ml_confidence"] = 0
+                result["ml_historical_win_rate"] = 0.0
+                result["ml_expected_return"] = 0.0
+                result["ml_sample_size"] = 0
         else:
             result["ml_breakout_score"] = 0
             result["ml_crash_risk"] = 0
             result["ml_prediction"] = "N/A"
             result["ml_confidence"] = 0
+            result["ml_historical_win_rate"] = 0.0
+            result["ml_expected_return"] = 0.0
+            result["ml_sample_size"] = 0
         
         return result
     except Exception as e:
@@ -2492,6 +2512,10 @@ Short: {na(r['short_percent'],"{:.1f}%")} ({na(r['days_to_cover'],"{:.1f}d")})<b
         # Add ML breakout score and crash risk
         ml_score = r.get('ml_breakout_score', 0)
         ml_crash = r.get('ml_crash_risk', 0)
+        ml_win_rate = r.get('ml_historical_win_rate', 0.0)
+        ml_expected_return = r.get('ml_expected_return', 0.0)
+        ml_sample_size = r.get('ml_sample_size', 0)
+        
         if ml_score > 0:
             if ml_score >= 70:
                 ml_html = f'<span style="color:var(--pos);font-weight:bold;font-size:1.1em">🚀 {ml_score}%</span>'
@@ -2503,6 +2527,30 @@ Short: {na(r['short_percent'],"{:.1f}%")} ({na(r['days_to_cover'],"{:.1f}d")})<b
             ml_html = '<span class="ml-na">🚀 N/A</span>'
         if ml_crash >= 50:
             ml_html += f'<br><span style="color:var(--neg);font-size:0.85em">⚠️ {ml_crash}%</span>'
+        
+        # Add historical performance if available
+        if ml_win_rate > 0 and ml_sample_size > 0:
+            perf_color = "var(--pos)" if ml_win_rate >= 70 else "var(--neg)" if ml_win_rate < 50 else "#ff8800"
+            ml_html += f'<br><span style="color:{perf_color};font-size:0.8em">📊 {ml_win_rate:.0f}% win rate ({ml_sample_size} trades)</span>'
+            if abs(ml_expected_return) > 0.1:  # Only show if meaningful
+                ret_color = "var(--pos)" if ml_expected_return > 0 else "var(--neg)"
+                ml_html += f'<br><span style="color:{ret_color};font-size:0.8em">💰 Expected: {ml_expected_return:+.1f}%</span>'
+        
+        # Add options strategy suggestions for table view based on technical indicators
+        trend_score = r.get('trend_score', 0)
+        death_cross = r.get('death_cross', False)
+        change_pct = r.get('change_pct', 0)
+        rsi = r.get('rsi', 50)
+        
+        if trend_score >= 70 and change_pct > 2:
+            ml_html += f'<br><span style="color:var(--pos);font-size:0.75em">📈 <strong>Calls</strong> - strong uptrend</span>'
+        elif trend_score <= -70 or death_cross:
+            ml_html += f'<br><span style="color:var(--neg);font-size:0.75em">📉 <strong>Puts</strong> - bearish signals</span>'
+        elif rsi >= 70 and change_pct > 1:
+            ml_html += f'<br><span style="color:#ff8800;font-size:0.75em">📈 <strong>Calls</strong> - momentum</span>'
+        elif rsi <= 30 and change_pct < -1:
+            ml_html += f'<br><span style="color:#ff8800;font-size:0.75em">📉 <strong>Puts</strong> - oversold</span>'
+        
         indicators_html += f"<br>{ml_html}"
         
         # Add confidence and risk management if available
@@ -2927,6 +2975,50 @@ Short: {na(r['short_percent'],"{:.1f}%")} ({na(r['days_to_cover'],"{:.1f}d")})<b
 {card_trade_setup_html}
         </div>
         <div class="card-page">
+<div><strong>ML Predictions</strong></div>"""
+        
+        # Add ML predictions to card view
+        card_ml_score = r.get('ml_breakout_score', 0)
+        card_ml_crash = r.get('ml_crash_risk', 0)
+        card_ml_win_rate = r.get('ml_historical_win_rate', 0.0)
+        card_ml_expected_return = r.get('ml_expected_return', 0.0)
+        card_ml_sample_size = r.get('ml_sample_size', 0)
+        
+        if card_ml_score > 0:
+            if card_ml_score >= 70:
+                html += f'<div><span style="color:var(--pos);font-weight:bold">🚀 BREAKOUT: {card_ml_score}%</span></div>'
+            elif card_ml_score >= 50:
+                html += f'<div><span style="color:#ff8800;font-weight:600">🚀 BREAKOUT: {card_ml_score}%</span></div>'
+            else:
+                html += f'<div><span style="font-size:0.9em">🚀 BREAKOUT: {card_ml_score}%</span></div>'
+        if card_ml_crash >= 50:
+            html += f'<div><span style="color:var(--neg)">⚠️ CRASH RISK: {card_ml_crash}%</span></div>'
+        
+        # Add historical performance if available
+        if card_ml_win_rate > 0 and card_ml_sample_size > 0:
+            perf_color = "var(--pos)" if card_ml_win_rate >= 70 else "var(--neg)" if card_ml_win_rate < 50 else "#ff8800"
+            html += f'<div style="font-size:0.9em;margin-top:8px"><span style="color:{perf_color}">📊 {card_ml_win_rate:.0f}% win rate ({card_ml_sample_size} trades)</span></div>'
+            if abs(card_ml_expected_return) > 0.1:  # Only show if meaningful
+                ret_color = "var(--pos)" if card_ml_expected_return > 0 else "var(--neg)"
+                html += f'<div style="font-size:0.9em"><span style="color:{ret_color}">💰 Expected: {card_ml_expected_return:+.1f}%</span></div>'
+        
+        # Add options strategy suggestions based on technical indicators
+        trend_score = r.get('trend_score', 0)
+        death_cross = r.get('death_cross', False)
+        golden_cross = r.get('golden_cross', False)
+        change_pct = r.get('change_pct', 0)
+        rsi = r.get('rsi', 50)
+        
+        if trend_score >= 70 and change_pct > 2:
+            html += f'<div style="font-size:0.9em;margin-top:4px"><span style="color:var(--pos)">📈 <strong>Options:</strong> Consider buying calls - strong uptrend</span></div>'
+        elif trend_score <= -70 or death_cross:
+            html += f'<div style="font-size:0.9em;margin-top:4px"><span style="color:var(--neg)">📉 <strong>Options:</strong> Consider buying puts - bearish signals</span></div>'
+        elif rsi >= 70 and change_pct > 1:
+            html += f'<div style="font-size:0.9em;margin-top:4px"><span style="color:#ff8800">📈 <strong>Options:</strong> Consider buying calls - overbought but momentum</span></div>'
+        elif rsi <= 30 and change_pct < -1:
+            html += f'<div style="font-size:0.9em;margin-top:4px"><span style="color:#ff8800">📉 <strong>Options:</strong> Consider buying puts - oversold with weakness</span></div>'
+        
+        html += f"""
 {card_ranges_html}
         </div>
     </div>
