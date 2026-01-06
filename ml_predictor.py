@@ -7,7 +7,7 @@ Trains models on historical data to predict:
 - NEUTRAL: Normal price action
 
 Features used (expected keys in stock_data dict):
-- Technical indicators: 'rsi', 'bb_position_pct', 'bb_width_pct', 'macd_label', 'atr_14'
+- Technical indicators: 'rsi', 'bb_position_pct', 'bb_width_pct', 'macd_label', 'atr_14', 'obv', 'stoch_k', 'stoch_d', 'adx', 'cci', 'mfi', 'williams_r', 'roc', 'vol_roc'
 - Volume & momentum: 'volume_bias', 'volume_spike', 'change_pct', 'change_5d', 'change_1m'
 - Moving averages: 'golden_cross', 'death_cross'
 - Fundamentals: 'pe_ratio', 'market_cap'
@@ -162,6 +162,15 @@ def extract_features(stock_data: Dict[str, Any]) -> List[float]:
     macd_label = stock_data.get("macd_label", None)
     features.append(1.0 if macd_label == "Bullish" else (-1.0 if macd_label == "Bearish" else 0.0))
     features.append(float(stock_data.get("atr_14", 0.0)))  # ATR (volatility)
+    features.append(float(stock_data.get("obv", 0.0)))  # On Balance Volume
+    features.append(float(stock_data.get("stoch_k", 50.0)))  # Stochastic %K
+    features.append(float(stock_data.get("stoch_d", 50.0)))  # Stochastic %D
+    features.append(float(stock_data.get("adx", 25.0)))  # ADX
+    features.append(float(stock_data.get("cci", 0.0)))  # CCI
+    features.append(float(stock_data.get("mfi", 50.0)))  # MFI
+    features.append(float(stock_data.get("williams_r", -50.0)))  # Williams %R
+    features.append(float(stock_data.get("roc", 0.0)))  # ROC
+    features.append(float(stock_data.get("vol_roc", 0.0)))  # Volume ROC
 
     # Volume & Momentum
     features.append(float(stock_data.get("volume_bias", 0.0)))  # Volume bias
@@ -208,6 +217,15 @@ FEATURE_NAMES = [
     "bb_width_pct",
     "macd_signal",
     "atr_14",
+    "obv",
+    "stoch_k",
+    "stoch_d",
+    "adx",
+    "cci",
+    "mfi",
+    "williams_r",
+    "roc",
+    "vol_roc",
     "volume_bias",
     "volume_spike",
     "change_pct",
@@ -376,8 +394,27 @@ def predict_breakout_crash(
             logger.warning("Model or scaler not available on disk - returning default neutral prediction")
             return {"breakout_score": 0, "crash_risk": 0, "prediction": "NEUTRAL", "confidence": 0}
 
-    # Extract and scale features
+    # Extract features
     features = extract_features(stock_data)
+    
+    # Check if scaler matches feature count, retrain if not
+    if scaler.n_features_in_ != len(features):
+        logger.info(f"Feature count mismatch: scaler expects {scaler.n_features_in_}, got {len(features)}. Retraining model...")
+        try:
+            # Generate mock training data
+            mock_data, mock_labels = generate_synthetic_training_data(n_samples=1000)
+            model, scaler = train_model(mock_data, mock_labels, verbose=False)
+            # Save the new model
+            MODEL_DIR.mkdir(parents=True, exist_ok=True)
+            with open(MODEL_FILE, "wb") as f:
+                pickle.dump(model, f)
+            with open(SCALER_FILE, "wb") as f:
+                pickle.dump(scaler, f)
+            logger.info("Model retrained and saved successfully")
+        except Exception as e:
+            logger.error(f"Failed to retrain model: {e}")
+            return {"breakout_score": 0, "crash_risk": 0, "prediction": "NEUTRAL", "confidence": 0}
+
     X = np.array([features], dtype=float)
     X = np.nan_to_num(X, nan=0.0, posinf=0.0, neginf=0.0)
 
@@ -476,6 +513,15 @@ def generate_synthetic_training_data(n_samples: int = 1000) -> Tuple[List[Dict[s
             "bb_width_pct": np.random.uniform(2, 20),
             "macd_label": np.random.choice(["Bullish", "Bearish", None]),
             "atr_14": np.random.uniform(1, 10),
+            "obv": np.random.uniform(-1000000, 1000000),
+            "stoch_k": np.random.uniform(0, 100),
+            "stoch_d": np.random.uniform(0, 100),
+            "adx": np.random.uniform(0, 100),
+            "cci": np.random.uniform(-200, 200),
+            "mfi": np.random.uniform(0, 100),
+            "williams_r": np.random.uniform(-100, 0),
+            "roc": np.random.uniform(-50, 50),
+            "vol_roc": np.random.uniform(-50, 50),
             "volume_bias": np.random.uniform(-1, 1),
             "volume_spike": np.random.choice([True, False]),
             "change_pct": np.random.uniform(-10, 10),
@@ -575,6 +621,15 @@ if __name__ == "__main__":
                     "bb_width_pct": 10.0,
                     "macd_label": None,
                     "atr_14": 0.0,
+                    "obv": 0.0,
+                    "stoch_k": 50.0,
+                    "stoch_d": 50.0,
+                    "adx": 25.0,
+                    "cci": 0.0,
+                    "mfi": 50.0,
+                    "williams_r": -50.0,
+                    "roc": 0.0,
+                    "vol_roc": 0.0,
                     "volume_bias": 0.0,
                     "volume_spike": False,
                     "change_pct": 0.0,

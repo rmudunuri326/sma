@@ -728,7 +728,7 @@ def check_alerts(data):
     if low_52w:
         grouped.append(fmt(low_52w, "📉", "52W Low"))
     if buy_signals:
-        grouped.append(fmt(buy_signals, "�", "Buy"))
+        grouped.append(fmt(buy_signals, "🟢", "Buy"))
     if sell_signals:
         grouped.append(fmt(sell_signals, "🟠", "Sell"))
     if short_signals:
@@ -1171,21 +1171,17 @@ def fetch(ticker, ext=False, retry=0):
             tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
             atr_value = tr.rolling(window=14).mean().iloc[-1]
             
-            # Only calculate stop loss and position sizing for active BUY/SHORT signals
-            if atr_value and atr_value > 0 and primary_signal in ('BUY', 'SHORT'):
+            # Calculate stop loss and position sizing for all tickers with ATR data
+            if atr_value and atr_value > 0:
                 # Configurable ATR multiplier for stop loss
                 ATR_STOP_MULTIPLIER = float(os.getenv('ATR_STOP_MULTIPLIER', '2.0'))
                 RISK_PER_TRADE = float(os.getenv('RISK_PER_TRADE', '2.0'))  # % of account
                 
-                if primary_signal == 'BUY':
-                    stop_loss = price - (atr_value * ATR_STOP_MULTIPLIER)
-                    # Target: 2x risk (configurable)
-                    target_price = price + (atr_value * ATR_STOP_MULTIPLIER * 2)
-                    risk_reward_ratio = 2.0
-                elif primary_signal == 'SHORT':
-                    stop_loss = price + (atr_value * ATR_STOP_MULTIPLIER)
-                    target_price = price - (atr_value * ATR_STOP_MULTIPLIER * 2)
-                    risk_reward_ratio = 2.0
+                # Default to LONG position for stop loss calculation
+                stop_loss = price - (atr_value * ATR_STOP_MULTIPLIER)
+                # Target: 2x risk (configurable)
+                target_price = price + (atr_value * ATR_STOP_MULTIPLIER * 2)
+                risk_reward_ratio = 2.0
                 
                 # Calculate position size (% of account to risk)
                 if stop_loss:
@@ -1194,6 +1190,87 @@ def fetch(ticker, ext=False, retry=0):
                         # Position size to risk X% of account
                         position_size_pct = RISK_PER_TRADE / (risk_per_share / price * 100)
                         position_size_pct = min(position_size_pct, 25.0)  # Max 25% position
+        
+        # Calculate OBV (On Balance Volume)
+        obv = None
+        if len(h30) >= 2:
+            sign = (h30["Close"] > h30["Close"].shift(1)).astype(int) * 2 - 1
+            obv = (h30["Volume"] * sign).cumsum().iloc[-1]
+        
+        # Calculate Stochastic Oscillator
+        stoch_k = stoch_d = None
+        if len(h30) >= 14:
+            low_14 = h30["Low"].rolling(14).min()
+            high_14 = h30["High"].rolling(14).max()
+            k = ((h30["Close"] - low_14) / (high_14 - low_14)) * 100
+            stoch_k = k.iloc[-1]
+            if len(k) >= 3:
+                stoch_d = k.rolling(3).mean().iloc[-1]
+        
+        # Calculate additional indicators for ML
+        adx = cci = mfi = williams_r = roc = vol_roc = None
+        
+        if len(h30) >= 14:
+            # Williams %R
+            high_14 = h30["High"].rolling(14).max()
+            low_14 = h30["Low"].rolling(14).min()
+            williams_r = ((high_14 - h30["Close"]) / (high_14 - low_14)) * -100
+            williams_r = williams_r.iloc[-1]
+            
+            # ROC (14-period)
+            if len(h30) >= 28:  # Need enough data for 14-period ROC
+                roc = ((h30["Close"] - h30["Close"].shift(14)) / h30["Close"].shift(14)) * 100
+                roc = roc.iloc[-1]
+            
+            # Volume ROC (14-period)
+            if len(h30) >= 28:
+                vol_roc = ((h30["Volume"] - h30["Volume"].shift(14)) / h30["Volume"].shift(14)) * 100
+                vol_roc = vol_roc.iloc[-1]
+        
+        if len(h30) >= 20:
+            # CCI (20-period)
+            tp = (h30["High"] + h30["Low"] + h30["Close"]) / 3
+            sma_tp = tp.rolling(20).mean()
+            mad = (tp - sma_tp).abs().rolling(20).mean()
+            cci = (tp - sma_tp) / (0.015 * mad)
+            cci = cci.iloc[-1]
+            
+            # MFI (14-period Money Flow Index)
+            typical_price = (h30["High"] + h30["Low"] + h30["Close"]) / 3
+            money_flow = typical_price * h30["Volume"]
+            positive_flow = money_flow.where(typical_price > typical_price.shift(1), 0)
+            negative_flow = money_flow.where(typical_price < typical_price.shift(1), 0)
+            positive_mf = positive_flow.rolling(14).sum()
+            negative_mf = negative_flow.rolling(14).sum()
+            mfi = 100 - (100 / (1 + (positive_mf / negative_mf)))
+            mfi = mfi.iloc[-1]
+        
+        # ADX calculation (14-period)
+        if len(h30) >= 28:  # Need enough data for ADX
+            high = h30["High"]
+            low = h30["Low"]
+            close = h30["Close"]
+            
+            # True Range
+            tr1 = high - low
+            tr2 = (high - close.shift(1)).abs()
+            tr3 = (low - close.shift(1)).abs()
+            tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+            
+            # Directional Movement
+            dm_plus = high - high.shift(1)
+            dm_minus = low.shift(1) - low
+            
+            dm_plus = dm_plus.where((dm_plus > dm_minus) & (dm_plus > 0), 0)
+            dm_minus = dm_minus.where((dm_minus > dm_plus) & (dm_minus > 0), 0)
+            
+            # Smoothed averages
+            atr = tr.rolling(14).mean()
+            di_plus = 100 * (dm_plus.rolling(14).mean() / atr)
+            di_minus = 100 * (dm_minus.rolling(14).mean() / atr)
+            
+            dx = 100 * (di_plus - di_minus).abs() / (di_plus + di_minus)
+            adx = dx.rolling(14).mean().iloc[-1]
         
         # Legacy bb_signal for backward compatibility (uses active strategy)
         bb_signal = primary_signal
@@ -1539,6 +1616,15 @@ def fetch(ticker, ext=False, retry=0):
             "position_size_pct": position_size_pct,
             "signal_confidence": signal_confidence,
             "signal_strength": signal_strength,
+            "obv": obv,
+            "stoch_k": stoch_k,
+            "stoch_d": stoch_d,
+            "adx": adx,
+            "cci": cci,
+            "mfi": mfi,
+            "williams_r": williams_r,
+            "roc": roc,
+            "vol_roc": vol_roc,
             "sma_50": sma_50,
             "sma_200": sma_200,
             "death_cross": death_cross,
@@ -2136,7 +2222,7 @@ input#tickerFilter:focus{{border-color:var(--accent);box-shadow:0 0 0 3px rgba(5
 <li><a href="https://tradingeconomics.com/us100:ind" target="_blank">US 100</a> | <a href="https://tradingeconomics.com/calendar" target="_blank">Calendar</a> | <a href="https://www.ssga.com/us/en/intermediary/resources/sector-tracker#currentTab=dayFive" target="_blank">Sectors</a> | <a href="https://tradingeconomics.com/stream" target="_blank">News</a> | <a href="https://finviz.com/news.ashx" target="_blank">Finviz</a></li>
 <li><a href="https://www.slickcharts.com/market-movers" target="_blank">Market Movers</a> | <a href="https://stockanalysis.com/markets/gainers/" target="_blank">SA: Movers</a> | <a href="https://stockanalysis.com/trending" target="_blank">SA: Trending</a> | <a href="https://stockanalysis.com/markets/heatmap/?time=1W" target="_blank">Heat Map</a> | <a href="https://www.morningstar.com/markets" target="_blank">MS: Markets</a></li>
 <li><a href="https://www.trackinsight.com/en" target="_blank">Flows</a> | <a href="https://www.google.com/search?q=https://www.morningstar.com/topics/fund-flows" target="_blank">MS: Flows</a> | <a href="https://www.ssga.com/us/en/intermediary/insights/a-feast-of-etf-inflows-and-returns" target="_blank">SPDR: Flows</a> | <a href="https://www.etf.com/sections/daily-etf-flows" target="_blank">ETF.com</a> | <a href="https://etfdb.com/etf-fund-flows/#issuer=blackrock-inc" target="_blank">ETFdb</a></li>
-<li><a href="https://www.cnn.com/markets/fear-and-greed" target="_blank">Fear & Greed Index</a> | <a href="https://www.aaii.com/sentiment-survey" target="_blank">AAII Sentiment</a> | <a href="https://chartschool.stockcharts.com/table-of-contents/trading-strategies-and-models" target="_blank">Trading Strategies</a></li>
+<li><a href="https://www.cnn.com/markets/fear-and-greed" target="_blank">Fear & Greed Index</a> | <a href="https://www.aaii.com/sentiment-survey" target="_blank">AAII Sentiment</a> | <a href="https://chartschool.stockcharts.com/table-of-contents/trading-strategies-and-models" target="_blank">Trading Strategies</a> | <a href="https://krmallina.github.io/smi/" target="_blank">Readme</a></li>
 </ul>
 </div>
 </details>
@@ -2214,13 +2300,13 @@ input#tickerFilter:focus{{border-color:var(--accent);box-shadow:0 0 0 3px rgba(5
         signal_icon = ""
         active_sig = r.get("active_signal") or r.get("bb_signal")
         if active_sig == "BUY":
-            signal_icon = '<span style="font-size:0.5em">🟢</span> '
+            signal_icon = '<span style="font-size:0.75em">🟢</span> '
         elif active_sig == "SHORT":
-            signal_icon = '<span style="font-size:0.5em">🔴</span> '
+            signal_icon = '<span style="font-size:0.75em">🔴</span> '
         elif active_sig == "SELL":
-            signal_icon = '<span style="font-size:0.5em">🟠</span> '
+            signal_icon = '<span style="font-size:0.75em">🟠</span> '
         elif active_sig == "HOLD":
-            signal_icon = '<span style="font-size:0.5em">⏸️</span> '
+            signal_icon = '<span style="font-size:0.755em">⏸️</span> '
         
         # Get color-coded trend arrow
         trend_arrow = ""
@@ -2412,9 +2498,9 @@ Short: {na(r['short_percent'],"{:.1f}%")} ({na(r['days_to_cover'],"{:.1f}d")})<b
             elif ml_score >= 50:
                 ml_html = f'<span style="color:#ff8800;font-weight:600">🚀 {ml_score}%</span>'
             else:
-                ml_html = f'<span style="color:var(--text);opacity:0.6;font-size:0.9em">🚀 {ml_score}%</span>'
+                ml_html = f'<span class="ml-low" style="font-size:0.9em">🚀 {ml_score}%</span>'
         else:
-            ml_html = '<span style="opacity:0.3">🚀 N/A</span>'
+            ml_html = '<span class="ml-na">🚀 N/A</span>'
         if ml_crash >= 50:
             ml_html += f'<br><span style="color:var(--neg);font-size:0.85em">⚠️ {ml_crash}%</span>'
         indicators_html += f"<br>{ml_html}"
@@ -2691,7 +2777,7 @@ Short: {na(r['short_percent'],"{:.1f}%")} ({na(r['days_to_cover'],"{:.1f}d")})<b
 <div style="font-weight:bold;font-size:1.1em;margin-bottom:10px;color:{setup_color}">{setup_icon} TRADE SETUP ({trade_type}{signal_label})</div>
 <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:0.95em;color:var(--text)">
 <div style="text-align:left"><strong>Entry:</strong> ${entry_price:.2f}</div>
-<div style="text-align:right;color:var(--text);opacity:0.8">Current</div>
+<div style="text-align:right;color:var(--text);opacity:1">Current</div>
 <div style="text-align:left"><strong>Stop Loss:</strong> ${stop_loss_price:.2f}</div>
 <div style="text-align:right;color:#ff4444;font-weight:bold">-{risk_pct:.1f}%</div>
 <div style="text-align:left"><strong>Target:</strong> ${target_price:.2f}</div>
@@ -2718,9 +2804,9 @@ Short: {na(r['short_percent'],"{:.1f}%")} ({na(r['days_to_cover'],"{:.1f}d")})<b
         if r.get('sma_50') or r.get('sma_200'):
             ma_parts = []
             if r.get('sma_50'):
-                ma_parts.append(f'<span class="neutral">50d: ${r.get("sma_50"):.2f}</span>')
+                ma_parts.append(f'50d: ${r.get("sma_50"):.2f}')
             if r.get('sma_200'):
-                ma_parts.append(f'<span class="neutral">200d: ${r.get("sma_200"):.2f}</span>')
+                ma_parts.append(f'200d: ${r.get("sma_200"):.2f}')
             
             cross_indicator = ''
             if r.get('death_cross'):

@@ -14,7 +14,7 @@ The ML Stock Predictor is a **production-ready machine learning system** that id
 
 ### 🤖 ML Pipeline
 1. **Data Acquisition**: Smart caching system with incremental updates
-2. **Feature Engineering**: 18 technical + fundamental indicators
+2. **Feature Engineering**: 27 technical + fundamental indicators
 3. **Model Training**: Gradient Boosting with stratified sampling
 4. **Validation**: Cross-validation with detailed metrics
 5. **Deployment**: Automated daily retraining with flat git history
@@ -47,7 +47,7 @@ python3 ml_predictor.py --help
 
 **Training Process:**
 1. **Data Loading**: Reads tickers from `data/tickers.csv` with smart caching
-2. **Feature Extraction**: Calculates 18 technical + fundamental indicators
+2. **Feature Extraction**: Calculates 27 technical + fundamental indicators
 3. **Model Training**: Gradient Boosting with 200 estimators, proper validation
 4. **Quality Assurance**: Cross-validation, feature importance analysis
 5. **Model Persistence**: Saves optimized model and scaler to `data/ml_models/`
@@ -219,13 +219,21 @@ The dashboard will show:
 
 ## Features Used by the Model
 
-The ML model analyzes 18 technical and fundamental features:
+The ML model analyzes 27 technical and fundamental features:
 
 ### Technical Indicators
 - RSI (momentum)
 - Bollinger Band position and width
 - MACD signal
 - ATR (volatility)
+- OBV (On-Balance Volume)
+- Stochastic %K/%D
+- ADX (Average Directional Index)
+- CCI (Commodity Channel Index)
+- MFI (Money Flow Index)
+- Williams %R
+- ROC (Rate of Change)
+- Volume ROC (Volume Rate of Change)
 - Volume bias and spikes
 - Moving average crosses (Golden/Death Cross)
 
