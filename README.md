@@ -396,23 +396,27 @@ Alert banner displays at top with color-coded hearts:
 
 ## Files
 
-- `stocks.py` - Main dashboard generator
+- `stocks.py` - Main dashboard generator with ML integration
 - `ml_predictor.py` - ML model training and prediction engine
+- `ML_GUIDE.md` - Comprehensive ML system documentation
 - `data/tickers.csv` - Tracked ticker symbols
 - `data/alerts.json` - Custom alert definitions
 - `data/dashboard.html` - Generated dashboard (auto-detects market hours)
 - `data/ml_models/` - Trained ML models and scalers
   - `breakout_crash_model.pkl` - Main ML model for breakout/crash predictions
   - `feature_scaler.pkl` - Feature normalization scaler
+- `data/stock_cache/` - Cached historical data (10x faster training)
+  - `*.pkl` - Individual ticker data files (auto-managed)
 - `.github/workflows/build.yml` - Automated dashboard updates (4 AM - 5 PM PST, every 30 min)
-- `.github/workflows/mlbuild.yml` - Weekly ML model retraining (Mondays at 1 AM PST)
+- `.github/workflows/mlbuild.yml` - **Daily ML training** (Mon-Fri at 3 AM PST)
 
 ## Performance
 
+- **Smart Caching**: 10x faster ML training after initial setup
 - **Parallel Processing**: 5 concurrent workers for data fetching
-- **Smart Caching**: Eliminates redundant API calls
 - **Optimized Calculations**: Vectorized operations for technical indicators
-- **Fast Rendering**: Generates both dashboards in ~2-3 minutes for 50 tickers
+- **Flat Git History**: Efficient storage for automated model updates
+- **Fast Rendering**: Generates dashboards in ~2-3 minutes for 50 tickers
 
 ## Installation
 
@@ -427,56 +431,95 @@ pip install -r requirements.txt
 
 ## ML Model Training & Automation
 
+### 🚀 Smart ML Training with Data Caching
+
+The ML system uses intelligent data caching to avoid re-downloading historical data:
+
+**First Training Run:**
+- Downloads 2 years of data for all tickers (~504 trading days)
+- Caches data locally in `data/stock_cache/`
+- Takes ~10-15 minutes for 200+ tickers
+
+**Subsequent Runs:**
+- Only fetches new data since last cache update
+- Uses cached data for existing tickers
+- Takes ~1-2 minutes (10x faster!)
+
 ### Manual ML Training
 
 Train the ML model on your ticker data:
 
 ```bash
-# Train ML model using tickers from data/tickers.csv
+# Quiet mode (default) - clean output for automation
 python3 ml_predictor.py
+
+# Verbose mode - detailed progress and metrics
+python3 ml_predictor.py --verbose
+
+# Help
+python3 ml_predictor.py --help
 ```
 
-This will:
-- Fetch historical data for all tickers
-- Train a new breakout/crash prediction model
-- Save the model to `data/ml_models/breakout_crash_model.pkl`
-- Test the model on sample data
+**Training Process:**
+- Reads tickers from `data/tickers.csv`
+- Uses smart caching for efficient data loading
+- Trains Gradient Boosting model on historical patterns
+- Saves model files to `data/ml_models/`
+- Shows accuracy and top features
 
 ### Automated ML Training
 
-The `mlbuild.yml` GitHub Actions workflow automatically retrains the ML model weekly:
+The `mlbuild.yml` GitHub Actions workflow automatically retrains the ML model **daily on working days**:
 
-- **Schedule**: Every Monday at 1:00 AM PST
-- **Trigger**: Manual via GitHub Actions UI
-- **Process**: 
-  - Fetches latest ticker data
-  - Trains new model on current market conditions
-  - Commits only the updated model files (no code changes)
-  - Maintains flat commit history for model updates
+- **Schedule**: Monday-Friday at 3:00 AM PST (11:00 AM UTC)
+- **Trigger**: Manual via GitHub Actions UI or automatic daily
+- **Smart Process**:
+  - Updates stock data cache with latest market data
+  - Retrains model on current market conditions
+  - Commits both model files AND stock cache (flat history)
+  - No code changes committed (only data updates)
 
 **Benefits:**
 - Models stay current with evolving market patterns
-- No manual intervention required
-- Automatic deployment of improved predictions
-- Historical model performance tracking
+- Stock cache keeps historical data fresh
+- Fully automated with smart caching
+- Flat git history prevents repository bloat
+- Runs during market off-hours for optimal timing
 
 ### ML Model Files
 
-- `data/ml_models/breakout_crash_model.pkl` - Gradient Boosting model trained on historical winners/losers
+- `data/ml_models/breakout_crash_model.pkl` - Gradient Boosting model
 - `data/ml_models/feature_scaler.pkl` - Feature normalization scaler
-- Models are automatically loaded by `stocks.py` for predictions
-- If models don't exist, predictions show as "N/A"
+- `data/stock_cache/*.pkl` - Cached historical data per ticker
+- Models auto-loaded by `stocks.py` for predictions
+- Cache enables 10x faster subsequent training runs
 
 ## Usage
 
 ### Quick Start
 
 ```bash
-# Run with default ticker file
+# 1. Train ML model (first time setup - takes ~10-15 min)
+python3 ml_predictor.py
+
+# 2. Generate dashboard with ML predictions
 python3 stocks.py
 
 # Or specify a custom ticker file
 python3 stocks.py data/tickers.csv
+```
+
+### ML Training Options
+
+```bash
+# Quiet mode (default) - clean output
+python3 ml_predictor.py
+
+# Verbose mode - detailed progress and metrics
+python3 ml_predictor.py --verbose
+
+# Help
+python3 ml_predictor.py --help
 ```
 
 ### Running with Custom Trading Strategy
@@ -704,3 +747,24 @@ Create `data/alerts.json` to define custom alert conditions for specific tickers
 - RSI, volume, and signal conditions do not require a `value`
 - Alerts appear in the banner at the top of the dashboard
 - Custom alerts are cached for 30 minutes to improve performance
+
+---
+
+## 📋 Recent Updates
+
+### v2.0+ ML Enhancements
+- **🤖 Smart ML Training**: Intelligent data caching (10x faster after initial setup)
+- **⏰ Daily Automation**: ML models retrain daily on working days (3 AM PST)
+- **📊 Integrated Predictions**: ML scores merged into INDICATORS column
+- **⚡ Command-Line Options**: `--verbose` flag for detailed logging
+- **💾 Efficient Storage**: Flat git history for automated model updates
+- **🔄 Stock Cache**: Persistent historical data cache for faster training
+
+### Key Improvements
+- Automated ML training runs Monday-Friday at 3:00 AM PST
+- Smart caching eliminates redundant data downloads
+- ML predictions show breakout/crash probabilities
+- Command-line verbose mode for debugging
+- Comprehensive ML documentation in `ML_GUIDE.md`
+
+See [ML_GUIDE.md](ML_GUIDE.md) for complete ML system documentation.

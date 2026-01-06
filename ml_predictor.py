@@ -50,7 +50,7 @@ DATA_CACHE_DIR = Path("data/stock_cache")
 DATA_CACHE_DIR.mkdir(exist_ok=True)
 
 
-def load_or_fetch_stock_data(ticker, force_refresh=False):
+def load_or_fetch_stock_data(ticker, force_refresh=False, verbose=False):
     """
     Smart data loading: Use cached data when available, only fetch new data.
     Returns up to 2 years of historical data.
@@ -67,11 +67,13 @@ def load_or_fetch_stock_data(ticker, force_refresh=False):
             days_since_update = (pd.Timestamp.now() - last_date).days
 
             if days_since_update < 7:  # Data is fresh enough (less than 1 week old)
-                print(f"  📂 Using cached data for {ticker} (last updated: {last_date.date()})")
+                if verbose:
+                    print(f"  📂 Using cached data for {ticker} (last updated: {last_date.date()})")
                 return cached_data
 
             # Fetch only new data since last cache
-            print(f"  🔄 Updating {ticker} data (last: {last_date.date()})...")
+            if verbose:
+                print(f"  🔄 Updating {ticker} data (last: {last_date.date()})...")
             try:
                 new_data = yf.Ticker(ticker).history(start=last_date + pd.Timedelta(days=1))
                 if not new_data.empty:
@@ -83,29 +85,36 @@ def load_or_fetch_stock_data(ticker, force_refresh=False):
 
                     # Save updated cache
                     combined_data.to_pickle(cache_file)
-                    print(f"  💾 Updated cache for {ticker} ({len(new_data)} new days)")
+                    if verbose:
+                        print(f"  💾 Updated cache for {ticker} ({len(new_data)} new days)")
                     return combined_data
                 else:
-                    print(f"  📂 No new data for {ticker}, using cache")
+                    if verbose:
+                        print(f"  📂 No new data for {ticker}, using cache")
                     return cached_data
 
             except Exception as e:
-                print(f"  ⚠️  Failed to update {ticker}: {e}, using cache")
+                if verbose:
+                    print(f"  ⚠️  Failed to update {ticker}: {e}, using cache")
                 return cached_data
 
         except Exception as e:
-            print(f"  ⚠️  Failed to load cache for {ticker}: {e}, fetching fresh data")
+            if verbose:
+                print(f"  ⚠️  Failed to load cache for {ticker}: {e}, fetching fresh data")
 
     # Fetch fresh data (first time or cache failed)
-    print(f"  📥 Fetching fresh data for {ticker}...")
+    if verbose:
+        print(f"  📥 Fetching fresh data for {ticker}...")
     try:
         stock_data = yf.Ticker(ticker).history(period="2y", auto_adjust=False)
         if not stock_data.empty:
             stock_data.to_pickle(cache_file)
-            print(f"  💾 Cached data for {ticker} ({len(stock_data)} days)")
+            if verbose:
+                print(f"  💾 Cached data for {ticker} ({len(stock_data)} days)")
         return stock_data
     except Exception as e:
-        print(f"  ❌ Failed to fetch data for {ticker}: {e}")
+        if verbose:
+            print(f"  ❌ Failed to fetch data for {ticker}: {e}")
         return pd.DataFrame()
 
 
@@ -220,12 +229,17 @@ def train_model(historical_data, labels):
     print(f"Training model on {len(X_train)} samples...")
     model.fit(X_train, y_train)
     
-    # Evaluate
+    # Validation results
     y_pred = model.predict(X_test)
-    print("\n📊 Model Performance:")
-    print(classification_report(y_test, y_pred))
-    print("\nConfusion Matrix:")
-    print(confusion_matrix(y_test, y_pred))
+    accuracy = (y_pred == y_test).mean()
+    print(f"✅ Model trained with {accuracy:.1%} accuracy on test set")
+    
+    if verbose:
+        # Detailed metrics only in verbose mode
+        print("\n📊 Model Performance:")
+        print(classification_report(y_test, y_pred))
+        print("\nConfusion Matrix:")
+        print(confusion_matrix(y_test, y_pred))
     
     # Feature importance
     importances = model.feature_importances_
@@ -234,8 +248,13 @@ def train_model(historical_data, labels):
         'importance': importances
     }).sort_values('importance', ascending=False)
     
-    print("\n🔝 Top 10 Most Important Features:")
-    print(feature_imp.head(10).to_string(index=False))
+    if verbose:
+        print("\n🔝 Top 10 Most Important Features:")
+        print(feature_imp.head(10).to_string(index=False))
+    else:
+        # Show only top 3 features in quiet mode
+        top_features = feature_imp.head(3)['feature'].tolist()
+        print(f"🔝 Top features: {', '.join(top_features)}")
     
     # Save model
     MODEL_DIR.mkdir(parents=True, exist_ok=True)
@@ -428,7 +447,16 @@ def generate_synthetic_training_data(n_samples=1000):
 
 
 if __name__ == "__main__":
-    print("🤖 ML Stock Predictor - Training Demo\n")
+    import argparse
+    
+    parser = argparse.ArgumentParser(description='ML Stock Predictor - Train breakout/crash detection models')
+    parser.add_argument('--verbose', '-v', action='store_true', 
+                       help='Enable verbose console output')
+    args = parser.parse_args()
+    
+    verbose = args.verbose
+    
+    print("🤖 ML Stock Predictor - Training..." if not verbose else "🤖 ML Stock Predictor - Training Demo\n")
     
     if not ML_AVAILABLE:
         print("❌ Please install ML libraries: pip install scikit-learn")
@@ -450,10 +478,11 @@ if __name__ == "__main__":
         training_data, labels = generate_synthetic_training_data(n_samples=2000)
     else:
         print(f"✅ Found ticker file at {TICKER_FILE}")
-        print("⚙️  Processing real historical data for training. This may take a while...")
+        if verbose:
+            print("⚙️  Processing real historical data for training. This may take a while...")
         
         tickers = get_tickers_from_file(TICKER_FILE)
-        print(f"Found {len(tickers)} unique tickers.")
+        print(f"⚙️  Processing {len(tickers)} tickers...")
 
         # This is a simplified feature/label generation process for demonstration.
         # For a production system, this logic should be much more robust.
@@ -461,9 +490,13 @@ if __name__ == "__main__":
         labels = []
 
         for i, ticker in enumerate(tickers):
-            print(f"Processing {ticker} ({i+1}/{len(tickers)})...")
+            # Show progress every 50 tickers (or all if verbose)
+            if verbose or (i + 1) % 50 == 0 or i == 0:
+                progress_msg = f"Processing {ticker} ({i+1}/{len(tickers)})" if verbose else f"Processing tickers... ({i+1}/{len(tickers)})"
+                print(progress_msg)
+            
             try:
-                stock_hist = load_or_fetch_stock_data(ticker)
+                stock_hist = load_or_fetch_stock_data(ticker, verbose=verbose)
                 if len(stock_hist) < 252: # Need at least 1 year of data
                     continue
 
@@ -495,7 +528,8 @@ if __name__ == "__main__":
                 labels.append(label)
 
             except Exception as e:
-                print(f"  Could not process {ticker}: {e}")
+                if verbose:
+                    print(f"  Could not process {ticker}: {e}")
 
         if not training_data:
             print("❌ No training data could be generated from the tickers. Exiting.")
@@ -530,10 +564,12 @@ if __name__ == "__main__":
     }
     
     result = predict_breakout_crash(test_stock, model, scaler)
-    print(f"\n📈 Prediction Results:")
-    print(f"   Breakout Score: {result['breakout_score']}%")
-    print(f"   Crash Risk: {result['crash_risk']}%")
-    print(f"   Prediction: {result['prediction']}")
-    print(f"   Confidence: {result['confidence']}%")
-    
-    print("\n✅ Model ready for production use!")
+    if verbose:
+        print(f"\n📈 Prediction Results:")
+        print(f"   Breakout Score: {result['breakout_score']}%")
+        print(f"   Crash Risk: {result['crash_risk']}%")
+        print(f"   Prediction: {result['prediction']}")
+        print(f"   Confidence: {result['confidence']}%")
+        print("\n✅ Model ready for production use!")
+    else:
+        print(f"✅ Model ready! Sample prediction: {result['prediction']} ({result['breakout_score']}% breakout, {result['crash_risk']}% crash risk)")

@@ -17,6 +17,15 @@ You can train the ML model manually or automate it with GitHub Actions:
     ```
 3. This will read tickers from `data/tickers.csv`, fetch historical data, train the model, and save the model files to `data/ml_models/`.
 
+**Command-line Options:**
+- `--verbose, -v`: Enable detailed console output including:
+  - Per-ticker progress (shows each ticker individually)
+  - Data fetching status (cache hits, updates, downloads)
+  - Detailed model performance metrics (classification report, confusion matrix)
+  - Top 10 most important features
+  - Extended error messages
+- Default mode is quiet for cleaner automated runs
+
 ### Automated Run (GitHub Actions)
 
 If you want to automate retraining, use the provided workflow:
@@ -31,7 +40,7 @@ If you want to automate retraining, use the provided workflow:
 - **Efficient storage**: Maintains flat git history to prevent repository bloat
 - **Automatic updates**: Both ML models and stock cache are kept current
 
-**Note:** The dashboard (`stocks.py`) will automatically use the latest model files for predictions if they exist.
+**Note:** The workflow runs in quiet mode by default. For detailed logs, trigger manually and check the Actions console.
 
 ## Features
 
@@ -93,6 +102,7 @@ This will:
 - Fetch real historical data for each ticker (2 years of data on first run)
 - Train the model on actual market patterns
 - Save model files to `data/ml_models/` and cache data to `data/stock_cache/`
+- **Quiet logging**: Shows progress every 50 tickers by default (use `--verbose` for detailed output)
 
 **Caching Benefits:**
 - **First run**: Downloads and caches 2 years of data (~10-15 minutes)
@@ -330,13 +340,52 @@ A: Ideally 500+ labeled examples across different market conditions. The automat
 **Q: How does the smart caching work?**  
 A: First run downloads 2 years of data and caches it. Subsequent runs only fetch new data since the last cache update, making training 10x faster.
 
+**Q: Why is the training output so quiet?**  
+A: By default, training runs in quiet mode for clean automated operation. Progress is shown every 50 tickers (e.g., "Processing tickers... (50/281)"). Use `--verbose` for detailed per-ticker logging and full metrics.
+
+**Q: How long does training take?**  
+A: First run: ~10-15 minutes (downloads all data). Subsequent runs: ~1-2 minutes (uses cache). Daily automated runs are optimized for speed.
+
+**Q: What if I want to force fresh data download?**  
+A: Delete the `data/stock_cache/` directory or specific ticker cache files. The system will automatically re-download data on the next run.
+
+**Q: How do I clear the cache for troubleshooting?**  
+A: Remove `data/stock_cache/` directory: `rm -rf data/stock_cache/`. Next training run will rebuild the cache from scratch.
+
+## Data Directory Structure
+
+After running ML training, your `data/` directory will contain:
+
+```
+data/
+├── tickers.csv              # Your ticker list
+├── ml_models/               # Trained ML models
+│   ├── breakout_crash_model.pkl
+│   └── feature_scaler.pkl
+├── stock_cache/             # Cached historical data (auto-managed)
+│   ├── AAPL.pkl            # Individual ticker data
+│   ├── MSFT.pkl
+│   └── ... (one file per ticker)
+└── dashboard.html           # Generated dashboard (from stocks.py)
+```
+
+**File Management:**
+- `ml_models/` and `stock_cache/` are committed by automated workflows
+- Cache files are automatically updated with fresh market data
+- Delete cache files to force fresh data download
+- Models are automatically loaded by the dashboard
+
 ## Next Steps
 
 1. ✅ Install dependencies
-2. ✅ Train model (synthetic or real data)
+2. ✅ Train model (first run takes ~10-15 min, subsequent runs ~1-2 min)
 3. ✅ Run dashboard and review ML scores
 4. 📊 Backtest predictions
-5. 🔄 **Automated daily retraining is active** (Mon-Fri 3 AM PST)
+5. 🔄 **Automated daily retraining active** (Mon-Fri 3 AM PST, quiet mode)
 6. 🎯 Integrate into your trading workflow
 
-For questions or issues, check the code comments in `ml_predictor.py` or create an issue in the repository.
+**Pro Tips:**
+- Use `--verbose` for detailed training logs during manual runs
+- Monitor automated runs via GitHub Actions for any issues
+- Cache persists between runs for optimal performance
+- Models automatically stay current with daily market data
