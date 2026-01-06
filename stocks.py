@@ -1013,9 +1013,13 @@ def fetch(ticker, ext=False, retry=0):
             pass
 
         down_bias = False
+        volume_bias = 0.0
         if len(h30) > 0:
             down_vol = h30[h30["Close"] < h30["Open"]]["Volume"].sum()
             up_vol = h30[h30["Close"] > h30["Open"]]["Volume"].sum()
+            total_vol = down_vol + up_vol
+            if total_vol > 0:
+                volume_bias = (down_vol - up_vol) / total_vol
             down_bias = down_vol > up_vol
 
         opt_dir = "Neutral"
@@ -1438,7 +1442,7 @@ def fetch(ticker, ext=False, retry=0):
         tu = ticker.upper()
         category = infer_category_from_info(tu, info) or get_category(tu)
         quote_type = (info.get("quoteType") or "").upper()
-        return {
+        result = {
             "ticker": tu,
             "quote_type": quote_type,
             "price": price,
@@ -1539,6 +1543,8 @@ def fetch(ticker, ext=False, retry=0):
             "sma_200": sma_200,
             "death_cross": death_cross,
             "golden_cross": golden_cross,
+            "volume_bias": volume_bias,
+            "trend_score": trend_score,
         }
         
         # ML Predictions (if available)
@@ -1549,7 +1555,7 @@ def fetch(ticker, ext=False, retry=0):
                 result["ml_crash_risk"] = ml_pred['crash_risk']
                 result["ml_prediction"] = ml_pred['prediction']
                 result["ml_confidence"] = ml_pred['confidence']
-            except Exception:
+            except Exception as e:
                 result["ml_breakout_score"] = 0
                 result["ml_crash_risk"] = 0
                 result["ml_prediction"] = "N/A"
@@ -1567,22 +1573,14 @@ def fetch(ticker, ext=False, retry=0):
             if retry < MAX_RETRIES:
                 # exponential backoff with jitter
                 wait_time = (2**retry) * 5 + random.uniform(0, 3)
-                print(
-                    f"{ticker}: Rate limited, waiting {wait_time:.1f}s (retry {retry+1}/{MAX_RETRIES})"
-                )
                 time.sleep(wait_time)
                 return fetch(ticker, ext, retry + 1)
             else:
-                print(f"{ticker}: Max retries reached, skipping")
                 return None
         elif "Unauthorized" in error_msg or "401" in error_msg:
             # Yahoo Finance feature gated; skip this ticker gracefully
-            print(
-                f"{ticker}: Unauthorized for some endpoints, skipping options/advanced data"
-            )
             return None
         else:
-            print(f"Error {ticker}: {e}")
             time.sleep(5)
             return None
 
@@ -1670,7 +1668,6 @@ def get_index_data(symbol):
                 ch_pct = None
         return {"price": price, "change_pct": ch_pct, "change_abs": ch_abs}
     except Exception as e:
-        print(f"Error fetching {symbol}: {e}")
         return {"price": None, "change_pct": None, "change_abs": None}
 
 
@@ -1744,7 +1741,6 @@ def load_ticker_sections(csv="data/tickers.csv"):
         
         return unique_tickers, unique_meme, unique_m7
     except Exception as e:
-        print(f"Warning: Could not load {csv}: {e}")
         return ["AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "TSLA", "META", "SPY"], [], []
 
 
@@ -1864,7 +1860,7 @@ def get_fear_greed_data():
             _fg_cache["time"] = now
             return result
         except Exception as e:
-            print(f"F&G error: {e}")
+            pass
     return {"score": None, "rating": "N/A", "raw_score": None}
 
 
@@ -1897,7 +1893,7 @@ def get_aaii_sentiment():
             _aaii_cache["time"] = now
             return result
     except Exception as e:
-        print(f"AAII fetch error: {e}")
+        pass
     return {"bullish": None, "bearish": None, "spread": None}
 
 
@@ -1912,7 +1908,6 @@ def html(df, vix, fg, aaii, file, ext=False, alerts=None):
     
     # Handle empty dataframe
     if df.empty:
-        print(f"Warning: No data to display. DataFrame is empty.")
         # Create a minimal HTML file
         with open(file, "w", encoding="utf-8") as f:
             f.write(f"<html><body><h1>No Data Available</h1><p>Last updated: {update}</p></body></html>")
@@ -2371,7 +2366,7 @@ input#tickerFilter:focus{{border-color:var(--accent);box-shadow:0 0 0 3px rgba(5
         pos_size = r.get('position_size_pct')
         
         # Confidence color coding
-        if confidence_val is not None:
+        if confidence_val is not None and strength_val is not None and confidence_val == confidence_val:
             if confidence_val >= 0.6:
                 conf_cls = "positive"
             elif confidence_val >= 0.3:
@@ -2380,7 +2375,7 @@ input#tickerFilter:focus{{border-color:var(--accent);box-shadow:0 0 0 3px rgba(5
                 conf_cls = "negative"
             conf_str = f'<span class="{conf_cls}">{strength_val} ({confidence_val:.0%})</span>'
         else:
-            conf_str = 'N/A'
+            conf_str = '<span class="neutral">HOLD</span>'
         
         # Risk management display (only when values available)
         risk_parts = []
@@ -2626,7 +2621,7 @@ Short: {na(r['short_percent'],"{:.1f}%")} ({na(r['days_to_cover'],"{:.1f}d")})<b
         
         # Build confidence display
         card_conf_html = ''
-        if card_confidence_val is not None:
+        if card_confidence_val is not None and card_strength_val is not None and card_confidence_val == card_confidence_val:
             if card_confidence_val >= 0.6:
                 card_conf_cls = "strong-bull"
             elif card_confidence_val >= 0.3:
@@ -2634,6 +2629,9 @@ Short: {na(r['short_percent'],"{:.1f}%")} ({na(r['days_to_cover'],"{:.1f}d")})<b
             else:
                 card_conf_cls = "strong-bear"
             card_conf_html = f'<div>Signal Confidence: <span class="{card_conf_cls}"><strong>{card_strength_val} ({card_confidence_val:.0%})</strong></span></div>'
+        else:
+            # Show HOLD for neutral positions or when confidence is unavailable
+            card_conf_html = '<div>Signal Confidence: <span class="neutral"><strong>HOLD</strong></span></div>'
         
         # Build risk management display (only when values available)
         card_risk_parts = []

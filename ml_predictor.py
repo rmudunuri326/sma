@@ -174,13 +174,13 @@ def extract_features(stock_data: Dict[str, Any]) -> List[float]:
     features.append(1.0 if stock_data.get("golden_cross", False) else (-1.0 if stock_data.get("death_cross", False) else 0.0))
 
     # Fundamentals
-    features.append(float(stock_data.get("pe_ratio", 0.0)))  # P/E ratio
+    features.append(float(stock_data.get("pe", 0.0)))  # P/E ratio
     # market_cap can be large; caller/model should log-transform if desired
     features.append(float(stock_data.get("market_cap", 0.0)))  # Market cap
 
     # Sentiment & Risk
     features.append(float(stock_data.get("put_call_ratio", 1.0)))  # Put/Call ratio
-    features.append(float(stock_data.get("short_interest", 0.0)))  # Short interest %
+    features.append(float(stock_data.get("short_percent", 0.0)))  # Short interest %
 
     # Squeeze Indicators
     squeeze_level = stock_data.get("squeeze_level", "None")
@@ -210,7 +210,7 @@ FEATURE_NAMES = [
     "atr_14",
     "volume_bias",
     "volume_spike",
-    "change_day",
+    "change_pct",
     "change_5d",
     "change_1m",
     "ma_cross",
