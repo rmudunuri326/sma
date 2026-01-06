@@ -11,8 +11,6 @@
 - **Confidence**: Model certainty (0-100%)
 - **Historical Performance Tracking**: Tracks prediction accuracy over time with win rates and expected returns
 - **Options Strategy Suggestions**: Rule-based recommendations for buying calls/puts based on technical indicators
-- **Robust Error Handling**: Comprehensive bounds checking prevents crashes on insufficient data
-- **Production Stability**: Graceful handling of stocks with limited historical data (100-251 days)
 - **Integrated in INDICATORS Column**: ML breakout/crash scores are now fully merged into the INDICATORS column (no separate column).
 - Color-coded: 🟢 Green (≥70%), 🟠 Orange (50-69%), Gray (<50%)
 - ⚠️ Crash warnings for high-risk stocks
@@ -40,9 +38,12 @@
 **Rule-Based Trading Recommendations**: Intelligent suggestions for options strategies based on technical analysis:
 - **📈 Buy Calls**: Suggested for strong uptrends (>70 trend score + >2% momentum) or overbought stocks with momentum (RSI >70 + >1% change)
 - **📉 Buy Puts**: Suggested for death crosses, strong downtrends (< -70 trend score), or oversold stocks with weakness (RSI <30 + <-1% change)
+- **💥 Earnings Straddle/Strangle**: Suggested for high volatility earnings (>8% implied move) with appropriate technical alignment
+- **📅 Pre-Earnings**: Watch for directional opportunities when implied move >5% and technicals align
+- **⚡ Post-Earnings**: Gap trading opportunities after earnings with >6% implied move
 - **Display**: Shows in both table view and card view ML Predictions section
-- **Rule-Based**: Uses technical indicators when ML predictions are neutral
-- **Color-Coded**: Green for bullish suggestions, red for bearish suggestions
+- **Rule-Based**: Uses technical indicators, implied move, and earnings timing when ML predictions are neutral
+- **Color-Coded**: Green for bullish, red for bearish, orange for momentum, purple for earnings plays
 
 ### 💰 Cost Analysis
 **Extremely Cost-Effective System**: Built for personal use with minimal operating costs:
@@ -54,15 +55,6 @@
 - **API Usage**: Rate-limited (0.6s between calls) with intelligent caching
 - **Optimization**: 90% storage reduction possible, 30-day cache TTL options
 
-### 🛡️ System Reliability & Robustness
-**Enterprise-Grade Stability**: Production-ready system with comprehensive error handling:
-- **Bounds Checking**: All pandas operations protected against IndexError crashes
-- **Data Validation**: Graceful handling of stocks with insufficient historical data
-- **Error Recovery**: Individual ticker failures don't break batch processing
-- **Smart Fallbacks**: Automatic fallback to earliest available data when needed
-- **Comprehensive Logging**: Professional logging for debugging and monitoring
-- **Cache Resilience**: Fallback mechanisms when network/API issues occur
-- **280+ Tickers**: Successfully processes large datasets with 91.1% model accuracy
 **Auto-Detecting Market Hours**: The dashboard automatically detects whether it's regular trading hours (9:30 AM - 4:00 PM ET, Mon-Fri) or extended hours, and fetches appropriate data accordingly. Extended hours sessions are indicated with a badge at the top of the dashboard.
 
 - **Table View**: Sortable columns with detailed metrics and sparklines

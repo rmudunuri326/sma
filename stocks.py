@@ -69,7 +69,7 @@ Trading Strategies:
 
 import yfinance as yf
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import os
 import argparse
 import json
@@ -1007,7 +1007,7 @@ def fetch(ticker, ext=False, retry=0):
                         )
                         straddle = cp + pp
                         if straddle > 0 and price > 0:
-                            impl_move = (straddle / price) * 100
+                            impl_move = round((straddle / price) * 100, 2)
                             cons = impl_move * 0.85
                             impl_hi = price * (1 + cons / 100)
                             impl_lo = price * (1 - cons / 100)
@@ -1476,23 +1476,23 @@ def fetch(ticker, ext=False, retry=0):
                 # numeric epoch
                 if isinstance(val, (int, float)):
                     dt = datetime.fromtimestamp(int(val), UTC).astimezone(PST)
-                    return dt.strftime("%b %d, %Y"), dt.date().isoformat()
+                    return dt.strftime("%m/%d/%Y"), dt.date().isoformat()
                 if isinstance(val, str):
                     s = val.strip()
                     if s.isdigit():
                         dt = datetime.fromtimestamp(int(s), UTC).astimezone(PST)
-                        return dt.strftime("%b %d, %Y"), dt.date().isoformat()
+                        return dt.strftime("%m/%d/%Y"), dt.date().isoformat()
                     try:
                         d = datetime.fromisoformat(s.split("T")[0])
                         d = d.replace(tzinfo=UTC)
                         dt = d.astimezone(PST)
-                        return dt.strftime("%b %d, %Y"), dt.date().isoformat()
+                        return dt.strftime("%m/%d/%Y"), dt.date().isoformat()
                     except Exception:
                         try:
                             d = datetime.strptime(s.split("T")[0], "%Y-%m-%d")
                             d = d.replace(tzinfo=UTC)
                             dt = d.astimezone(PST)
-                            return dt.strftime("%b %d, %Y"), dt.date().isoformat()
+                            return dt.strftime("%m/%d/%Y"), dt.date().isoformat()
                         except Exception:
                             return None, None
                 return None, None
@@ -2551,6 +2551,40 @@ Short: {na(r['short_percent'],"{:.1f}%")} ({na(r['days_to_cover'],"{:.1f}d")})<b
         elif rsi <= 30 and change_pct < -1:
             ml_html += f'<br><span style="color:#ff8800;font-size:0.75em">📉 <strong>Puts</strong> - oversold</span>'
         
+        # Add earnings move suggestions for table view
+        earnings_date_iso = r.get('earnings_date_iso')
+        implied_move_pct = r.get('implied_move_pct')
+        
+        if earnings_date_iso and implied_move_pct:
+            try:
+                earnings_dt = datetime.fromisoformat(earnings_date_iso).replace(tzinfo=timezone.utc)
+                now = datetime.now(timezone.utc)
+                days_until_earnings = (earnings_dt - now).days
+                
+                if 0 <= days_until_earnings <= 30:  # Within a month
+                    if implied_move_pct >= 8:  # High volatility expected
+                        if trend_score >= 50:  # Bullish technicals
+                            ml_html += f'<br><span style="color:#ff6b35;font-size:0.75em">💥 <strong>Straddle</strong> - high vol earnings ({days_until_earnings}d)</span>'
+                        elif trend_score <= -50:  # Bearish technicals
+                            ml_html += f'<br><span style="color:#ff6b35;font-size:0.75em">💥 <strong>Strangle</strong> - vol play ({days_until_earnings}d)</span>'
+                        else:  # Neutral technicals
+                            ml_html += f'<br><span style="color:#ff6b35;font-size:0.75em">💥 <strong>Straddle</strong> - earnings vol ({days_until_earnings}d)</span>'
+                    elif implied_move_pct >= 5:  # Moderate volatility
+                        if rsi >= 70 and change_pct > 1:
+                            ml_html += f'<br><span style="color:#ff8800;font-size:0.75em">📈 <strong>Calls</strong> - earnings momentum ({days_until_earnings}d)</span>'
+                        elif rsi <= 30 and change_pct < -1:
+                            ml_html += f'<br><span style="color:#ff8800;font-size:0.75em">📉 <strong>Puts</strong> - earnings weakness ({days_until_earnings}d)</span>'
+                        elif trend_score >= 30:
+                            ml_html += f'<br><span style="color:#4CAF50;font-size:0.75em">📅 <strong>Pre-earnings</strong> - watch calls ({days_until_earnings}d)</span>'
+                        elif trend_score <= -30:
+                            ml_html += f'<br><span style="color:#f44336;font-size:0.75em">📅 <strong>Pre-earnings</strong> - watch puts ({days_until_earnings}d)</span>'
+                elif days_until_earnings < 0 and abs(days_until_earnings) <= 1:  # Earnings today or yesterday
+                    if implied_move_pct >= 6:
+                        ml_html += f'<br><span style="color:#9c27b0;font-size:0.75em">⚡ <strong>Post-earnings</strong> - gap opportunity</span>'
+                        
+            except Exception:
+                pass  # Skip earnings suggestions if date parsing fails
+        
         indicators_html += f"<br>{ml_html}"
         
         # Add confidence and risk management if available
@@ -3017,6 +3051,40 @@ Short: {na(r['short_percent'],"{:.1f}%")} ({na(r['days_to_cover'],"{:.1f}d")})<b
             html += f'<div style="font-size:0.9em;margin-top:4px"><span style="color:#ff8800">📈 <strong>Options:</strong> Consider buying calls - overbought but momentum</span></div>'
         elif rsi <= 30 and change_pct < -1:
             html += f'<div style="font-size:0.9em;margin-top:4px"><span style="color:#ff8800">📉 <strong>Options:</strong> Consider buying puts - oversold with weakness</span></div>'
+        
+        # Add earnings move suggestions for card view
+        earnings_date_iso = r.get('earnings_date_iso')
+        implied_move_pct = r.get('implied_move_pct')
+        
+        if earnings_date_iso and implied_move_pct:
+            try:
+                earnings_dt = datetime.fromisoformat(earnings_date_iso).replace(tzinfo=timezone.utc)
+                now = datetime.now(timezone.utc)
+                days_until_earnings = (earnings_dt - now).days
+                
+                if 0 <= days_until_earnings <= 30:  # Within a month
+                    if implied_move_pct >= 8:  # High volatility expected
+                        if trend_score >= 50:  # Bullish technicals
+                            html += f'<div style="font-size:0.9em;margin-top:4px"><span style="color:#ff6b35">💥 <strong>Earnings:</strong> Consider straddle - high volatility expected ({days_until_earnings}d)</span></div>'
+                        elif trend_score <= -50:  # Bearish technicals
+                            html += f'<div style="font-size:0.9em;margin-top:4px"><span style="color:#ff6b35">💥 <strong>Earnings:</strong> Consider strangle - volatility play ({days_until_earnings}d)</span></div>'
+                        else:  # Neutral technicals
+                            html += f'<div style="font-size:0.9em;margin-top:4px"><span style="color:#ff6b35">💥 <strong>Earnings:</strong> Consider straddle - earnings volatility ({days_until_earnings}d)</span></div>'
+                    elif implied_move_pct >= 5:  # Moderate volatility
+                        if rsi >= 70 and change_pct > 1:
+                            html += f'<div style="font-size:0.9em;margin-top:4px"><span style="color:#ff8800">📈 <strong>Earnings:</strong> Consider calls - momentum into earnings ({days_until_earnings}d)</span></div>'
+                        elif rsi <= 30 and change_pct < -1:
+                            html += f'<div style="font-size:0.9em;margin-top:4px"><span style="color:#ff8800">📉 <strong>Earnings:</strong> Consider puts - weakness into earnings ({days_until_earnings}d)</span></div>'
+                        elif trend_score >= 30:
+                            html += f'<div style="font-size:0.9em;margin-top:4px"><span style="color:#4CAF50">📅 <strong>Earnings:</strong> Watch for call opportunities pre-earnings ({days_until_earnings}d)</span></div>'
+                        elif trend_score <= -30:
+                            html += f'<div style="font-size:0.9em;margin-top:4px"><span style="color:#f44336">📅 <strong>Earnings:</strong> Watch for put opportunities pre-earnings ({days_until_earnings}d)</span></div>'
+                elif days_until_earnings < 0 and abs(days_until_earnings) <= 1:  # Earnings today or yesterday
+                    if implied_move_pct >= 6:
+                        html += f'<div style="font-size:0.9em;margin-top:4px"><span style="color:#9c27b0">⚡ <strong>Earnings:</strong> Post-earnings gap trading opportunity</span></div>'
+                        
+            except Exception:
+                pass  # Skip earnings suggestions if date parsing fails
         
         html += f"""
 {card_ranges_html}

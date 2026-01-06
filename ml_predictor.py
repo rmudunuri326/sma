@@ -148,8 +148,46 @@ class PredictionPerformanceTracker:
         }
         
         self.performance_data["predictions"].append(prediction_record)
+        self._cleanup_old_predictions()
         self._update_metrics()
         self._save_performance_data()
+    
+    def _cleanup_old_predictions(self):
+        """
+        Clean up old predictions to maintain rolling window:
+        - Keep only last 5 trading days (approx 7 calendar days)
+        - Limit to maximum 5 entries per ticker
+        """
+        predictions = self.performance_data["predictions"]
+        if not predictions:
+            return
+            
+        now = pd.Timestamp.now()
+        cutoff_date = now - pd.Timedelta(days=7)  # 7 calendar days ≈ 5 trading days
+        
+        # Filter to recent predictions only
+        recent_predictions = [
+            pred for pred in predictions 
+            if pred["timestamp"] >= cutoff_date
+        ]
+        
+        # Group by ticker and limit to 5 most recent per ticker
+        ticker_predictions = {}
+        for pred in recent_predictions:
+            ticker = pred["ticker"]
+            if ticker not in ticker_predictions:
+                ticker_predictions[ticker] = []
+            ticker_predictions[ticker].append(pred)
+        
+        # Keep only 5 most recent for each ticker
+        cleaned_predictions = []
+        for ticker_preds in ticker_predictions.values():
+            # Sort by timestamp (most recent first) and take top 5
+            sorted_preds = sorted(ticker_preds, key=lambda x: x["timestamp"], reverse=True)
+            cleaned_predictions.extend(sorted_preds[:5])
+        
+        # Update the predictions list
+        self.performance_data["predictions"] = cleaned_predictions
     
     def update_outcomes(self):
         """

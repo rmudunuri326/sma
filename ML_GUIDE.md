@@ -9,7 +9,6 @@ The ML Stock Predictor is a **production-ready machine learning system** that id
 ### 🏗️ Professional Code Structure
 - **Type Hints**: Full type annotations for reliability and IDE support
 - **Structured Logging**: Professional logging with timestamps, levels, and proper formatting
-- **Error Handling**: Robust exception handling with graceful degradation
 - **Modular Design**: Clean separation of concerns with well-documented functions
 
 ### 🤖 ML Pipeline
@@ -25,7 +24,7 @@ You can train the ML model manually or automate it with GitHub Actions:
 
 ### Manual Run (Local)
 
-Train the ML model with professional logging and error handling:
+Train the ML model with professional logging:
 
 ```bash
 # Quiet mode (default) - clean output for automation
@@ -41,7 +40,6 @@ python3 ml_predictor.py --help
 **Professional Training Features:**
 - **Smart Caching**: 10x faster after initial setup
 - **Stratified Sampling**: Balanced class distribution
-- **Robust Error Handling**: Individual failures don't break training
 - **Progress Tracking**: Smart reporting (quiet: every 50 tickers, verbose: every ticker)
 - **Comprehensive Logging**: Timestamps, levels, and detailed metrics
 
@@ -85,28 +83,29 @@ python3 ml_predictor.py --help
 - **Confidence**: Model certainty (0-100%)
 - **Historical Performance Tracking**: Tracks prediction accuracy with win rates and expected returns
 - **Options Strategy Suggestions**: Rule-based recommendations for calls/puts based on technical indicators
-- **Robust Error Handling**: Comprehensive bounds checking prevents crashes on insufficient data
-- **Smart Data Processing**: Graceful handling of stocks with limited historical data (100-251 days)
+- **Earnings Move Suggestions**: Advanced trading strategies for earnings events based on implied volatility and technical setup
 
-## Robustness & Error Handling
+## Earnings Move Suggestions
 
-### 🛡️ Production-Grade Stability
-The ML system includes enterprise-level error handling and data validation:
+The system provides intelligent trading recommendations around earnings events, combining implied volatility with technical analysis:
 
-**Bounds Checking:**
-- All pandas `.iloc[-1]` operations protected against out-of-bounds access
-- Automatic fallback to earliest available data when 1-year snapshots unavailable
-- Validation for all technical indicator calculations
+### Pre-Earnings Strategies (0-30 days before earnings)
+- **High Volatility (>8% implied move)**:
+  - **Straddle**: Buy both calls and puts when technicals are neutral - profit from any direction
+  - **Strangle**: Buy out-of-money calls/puts when technicals show directional bias - cheaper than straddle
+- **Moderate Volatility (5-8% implied move)**:
+  - **Directional Calls/Puts**: Based on RSI and trend alignment
+  - **Watch Lists**: Pre-earnings opportunities when technicals align with implied direction
 
-**Data Quality Assurance:**
-- Minimum data requirements (100+ days) with graceful degradation
-- NaN value handling for incomplete datasets
-- Individual ticker failures don't break batch processing
+### Post-Earnings Strategies (Earnings day ±1 day)
+- **Gap Trading**: Opportunities after earnings surprise moves
+- **Volatility Contraction**: Selling options after volatility spike subsides
 
-**Error Recovery:**
-- Cache fallback when network/API issues occur
-- Comprehensive logging for debugging and monitoring
-- Automatic retry logic for transient failures
+### Technical Integration
+- **Trend Score**: Aligns with directional bias for earnings plays
+- **RSI**: Momentum confirmation for earnings strategies
+- **Implied Move**: Volatility expectations drive strategy selection
+- **Days to Earnings**: Time-based strategy recommendations
 
 ## Historical Performance Tracking
 
@@ -127,7 +126,28 @@ The system now tracks every ML prediction and its outcome to provide statistical
 ### Data Storage
 - **File**: `data/ml_models/prediction_performance.pkl`
 - **Structure**: Dictionary with prediction history and performance summaries
-- **Persistence**: Data survives between runs and accumulates over time
+- **Rolling Window**: Automatically maintains last 5 trading days (~7 calendar days) of predictions
+- **Per-Ticker Limit**: Maximum 5 most recent predictions per ticker
+- **Automatic Cleanup**: Old predictions are removed when new ones are recorded
+- **Repository Impact**: File size stays bounded (~50-100KB), flat git history prevents bloat
+
+### Repository Size Management
+**Daily automated training uses `git commit --amend`** to maintain flat git history:
+- Only one commit exists for daily ML updates (no commit chain growth)
+- Rolling window keeps prediction data bounded
+- **Net effect**: Minimal and stable repository growth
+
+**Automatic Cleanup Behavior:**
+- **Trigger**: Cleanup runs automatically when new predictions are recorded
+- **Window**: Keeps predictions from last 7 calendar days (≈5 trading days)
+- **Per-Ticker**: Limits to 5 most recent predictions per ticker
+
+**To reset performance data if needed:**
+```bash
+# Remove accumulated prediction history
+rm data/ml_models/prediction_performance.pkl
+# Next training run will start fresh performance tracking
+```
 
 ### Benefits
 - **Validation**: Provides statistical evidence of ML model effectiveness
