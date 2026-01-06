@@ -6,14 +6,14 @@ Trains models on historical data to predict:
 - CRASH: Stocks likely to drop >50% in 6-12 months
 - NEUTRAL: Normal price action
 
-Features used (expected keys in stock_data dict):
-- Technical indicators: 'rsi', 'bb_position_pct', 'bb_width_pct', 'macd_label', 'atr_14', 'obv', 'stoch_k', 'stoch_d', 'adx', 'cci', 'mfi', 'williams_r', 'roc', 'vol_roc'
-- Volume & momentum: 'volume_bias', 'volume_spike', 'change_pct', 'change_5d', 'change_1m'
-- Moving averages: 'golden_cross', 'death_cross'
-- Fundamentals: 'pe_ratio', 'market_cap'
-- Sentiment: 'put_call_ratio', 'short_interest'
-- Squeeze: 'squeeze_level'
-- Signals/trend: 'active_signal', 'trend_score'
+Features used (28 technical + fundamental indicators):
+- Technical: RSI, BB Position %, BB Width %, MACD, ATR, OBV, Stochastic %K/%D, ADX, CCI, MFI, Williams %R, ROC, Vol ROC
+- Volume & Momentum: Volume bias, Volume spike, Change %, 5D Change, 1M Change
+- Moving Averages: Golden/Death crosses
+- Fundamentals: P/E ratio, Market cap, EPS
+- Sentiment: Put/Call ratio, Short interest %
+- Squeeze: Squeeze levels
+- Signals/Trend: Active signals, Trend scores
 
 Usage:
     from ml_predictor import predict_breakout_crash
@@ -67,6 +67,44 @@ SCALER_FILE = MODEL_DIR / "feature_scaler.pkl"
 # Data caching for efficiency
 DATA_CACHE_DIR = Path("data/stock_cache")
 DATA_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
+# Model hyperparameters
+MODEL_CONFIG = {
+    "n_estimators": 200,
+    "learning_rate": 0.1,
+    "max_depth": 5,
+    "min_samples_split": 20,
+    "min_samples_leaf": 10,
+    "subsample": 0.8,
+    "random_state": 42,
+}
+
+# Default feature values
+DEFAULT_FEATURES = {
+    "rsi": 50.0,
+    "bb_position_pct": 50.0,
+    "bb_width_pct": 10.0,
+    "atr_14": 0.0,
+    "obv": 0.0,
+    "stoch_k": 50.0,
+    "stoch_d": 50.0,
+    "adx": 25.0,
+    "cci": 0.0,
+    "mfi": 50.0,
+    "williams_r": -50.0,
+    "roc": 0.0,
+    "vol_roc": 0.0,
+    "volume_bias": 0.0,
+    "change_pct": 0.0,
+    "change_5d": 0.0,
+    "change_1m": 0.0,
+    "pe_ratio": 25.0,
+    "market_cap": 1e9,
+    "eps": 5.0,
+    "put_call_ratio": 1.0,
+    "short_interest": 0.0,
+    "trend_score": 0.0,
+}
 
 
 def load_or_fetch_stock_data(ticker: str, force_refresh: bool = False, verbose: bool = False) -> pd.DataFrame:
@@ -150,59 +188,35 @@ def extract_features(stock_data: Dict[str, Any]) -> List[float]:
     Extract ML features from a stock_data dictionary.
 
     Returns a list of numerical features in the consistent order of FEATURE_NAMES.
-
-    Note: uses dict.get(key, default) to preserve valid falsy values (e.g., 0).
+    Uses DEFAULT_FEATURES for missing values and handles special encoding cases.
     """
     features: List[float] = []
 
-    # Technical Indicators
-    features.append(float(stock_data.get("rsi", 50.0)))  # RSI
-    features.append(float(stock_data.get("bb_position_pct", 50.0)))  # BB Position %
-    features.append(float(stock_data.get("bb_width_pct", 10.0)))  # BB Width %
-    macd_label = stock_data.get("macd_label", None)
-    features.append(1.0 if macd_label == "Bullish" else (-1.0 if macd_label == "Bearish" else 0.0))
-    features.append(float(stock_data.get("atr_14", 0.0)))  # ATR (volatility)
-    features.append(float(stock_data.get("obv", 0.0)))  # On Balance Volume
-    features.append(float(stock_data.get("stoch_k", 50.0)))  # Stochastic %K
-    features.append(float(stock_data.get("stoch_d", 50.0)))  # Stochastic %D
-    features.append(float(stock_data.get("adx", 25.0)))  # ADX
-    features.append(float(stock_data.get("cci", 0.0)))  # CCI
-    features.append(float(stock_data.get("mfi", 50.0)))  # MFI
-    features.append(float(stock_data.get("williams_r", -50.0)))  # Williams %R
-    features.append(float(stock_data.get("roc", 0.0)))  # ROC
-    features.append(float(stock_data.get("vol_roc", 0.0)))  # Volume ROC
-
-    # Volume & Momentum
-    features.append(float(stock_data.get("volume_bias", 0.0)))  # Volume bias
-    features.append(1.0 if stock_data.get("volume_spike", False) else 0.0)  # Volume spike flag
-    features.append(float(stock_data.get("change_pct", 0.0)))  # Daily change %
-    features.append(float(stock_data.get("change_5d", 0.0)))  # 5-day change %
-    features.append(float(stock_data.get("change_1m", 0.0)))  # 1-month change %
-
-    # Moving Averages & Crosses
-    features.append(1.0 if stock_data.get("golden_cross", False) else (-1.0 if stock_data.get("death_cross", False) else 0.0))
-
-    # Fundamentals
-    features.append(float(stock_data.get("pe", 0.0)))  # P/E ratio
-    # market_cap can be large; caller/model should log-transform if desired
-    features.append(float(stock_data.get("market_cap", 0.0)))  # Market cap
-
-    # Sentiment & Risk
-    features.append(float(stock_data.get("put_call_ratio", 1.0)))  # Put/Call ratio
-    features.append(float(stock_data.get("short_percent", 0.0)))  # Short interest %
-
-    # Squeeze Indicators
-    squeeze_level = stock_data.get("squeeze_level", "None")
-    squeeze_score = {"None": 0, "Moderate": 1, "High": 2, "Extreme": 3}.get(squeeze_level, 0)
-    features.append(float(squeeze_score))
-
-    # Trading Signals
-    active_signal = stock_data.get("active_signal", "HOLD")
-    signal_map = {"BUY": 1.0, "SHORT": -1.0, "SELL": -0.5, "HOLD": 0.0}
-    features.append(float(signal_map.get(active_signal, 0.0)))
-
-    # Trend Score
-    features.append(float(stock_data.get("trend_score", 0.0)))
+    # Extract features in exact FEATURE_NAMES order
+    for feature_name in FEATURE_NAMES:
+        if feature_name in DEFAULT_FEATURES:
+            # Standard numerical features
+            features.append(float(stock_data.get(feature_name, DEFAULT_FEATURES[feature_name])))
+        else:
+            # Special encoded features
+            if feature_name == "macd_signal":
+                macd_label = stock_data.get("macd_label", None)
+                features.append(1.0 if macd_label == "Bullish" else (-1.0 if macd_label == "Bearish" else 0.0))
+            elif feature_name == "volume_spike":
+                features.append(1.0 if stock_data.get("volume_spike", False) else 0.0)
+            elif feature_name == "ma_cross":
+                features.append(1.0 if stock_data.get("golden_cross", False) else (-1.0 if stock_data.get("death_cross", False) else 0.0))
+            elif feature_name == "squeeze_score":
+                squeeze_level = stock_data.get("squeeze_level", "None")
+                squeeze_score = {"None": 0, "Moderate": 1, "High": 2, "Extreme": 3}.get(squeeze_level, 0)
+                features.append(float(squeeze_score))
+            elif feature_name == "trading_signal":
+                active_signal = stock_data.get("active_signal", "HOLD")
+                signal_map = {"BUY": 1.0, "SHORT": -1.0, "SELL": -0.5, "HOLD": 0.0}
+                features.append(float(signal_map.get(active_signal, 0.0)))
+            else:
+                # Fallback for any missing features
+                features.append(0.0)
 
     # Sanity check: feature length must match FEATURE_NAMES
     if len(features) != len(FEATURE_NAMES):
@@ -234,6 +248,7 @@ FEATURE_NAMES = [
     "ma_cross",
     "pe_ratio",
     "market_cap",
+    "eps",
     "put_call_ratio",
     "short_interest",
     "squeeze_score",
@@ -290,16 +305,7 @@ def train_model(historical_data: List[Dict[str, Any]], labels: List[str], verbos
     )
 
     # Train Gradient Boosting Classifier
-    model = GradientBoostingClassifier(
-        n_estimators=200,
-        learning_rate=0.1,
-        max_depth=5,
-        min_samples_split=20,
-        min_samples_leaf=10,
-        subsample=0.8,
-        random_state=42,
-        verbose=0,
-    )
+    model = GradientBoostingClassifier(**MODEL_CONFIG, verbose=0)
 
     logger.info(f"Training model on {len(X_train)} samples...")
     model.fit(X_train, y_train)
@@ -559,6 +565,52 @@ def generate_synthetic_training_data(n_samples: int = 1000) -> Tuple[List[Dict[s
     return data, labels
 
 
+def run_basic_tests() -> bool:
+    """
+    Run basic unit tests for core functionality.
+    Returns True if all tests pass, False otherwise.
+    """
+    logger.info("🧪 Running basic tests...")
+
+    # Test feature extraction
+    test_stock = {
+        "rsi": 65.0,
+        "bb_position_pct": 75.0,
+        "bb_width_pct": 15.0,
+        "macd_label": "Bullish",
+        "atr_14": 2.5,
+        "volume_spike": True,
+        "golden_cross": True,
+        "pe_ratio": 20.0,
+        "squeeze_level": "High",
+        "active_signal": "BUY",
+        "trend_score": 2.0,
+    }
+
+    try:
+        features = extract_features(test_stock)
+        assert len(features) == len(FEATURE_NAMES), f"Feature count mismatch: {len(features)} vs {len(FEATURE_NAMES)}"
+        assert features[0] == 65.0, "RSI feature extraction failed"
+        assert features[3] == 1.0, "MACD bullish encoding failed"  # macd_signal is at index 3
+        logger.info("✅ Feature extraction tests passed")
+    except Exception as e:
+        logger.error(f"❌ Feature extraction test failed: {e}")
+        return False
+
+    # Test prediction with defaults (should return neutral)
+    try:
+        result = predict_breakout_crash({})
+        assert result["prediction"] == "NEUTRAL", "Default prediction failed"
+        assert result["breakout_score"] == 0, "Default breakout score failed"
+        logger.info("✅ Default prediction tests passed")
+    except Exception as e:
+        logger.error(f"❌ Default prediction test failed: {e}")
+        return False
+
+    logger.info("✅ All basic tests passed!")
+    return True
+
+
 if __name__ == "__main__":
     import argparse
     import sys
@@ -570,6 +622,11 @@ if __name__ == "__main__":
     if args.verbose:
         logger.setLevel(logging.DEBUG)
         logger.debug("🤖 ML Stock Predictor - Training Demo (verbose)")
+
+    # Run basic tests first
+    if not run_basic_tests():
+        logger.error("❌ Basic tests failed. Exiting.")
+        sys.exit(1)
 
     if not ML_AVAILABLE:
         logger.error("❌ Please install ML libraries: pip install scikit-learn")

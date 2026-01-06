@@ -10,7 +10,7 @@
 - **Integrated in INDICATORS Column**: ML breakout/crash scores are now fully merged into the INDICATORS column (no separate column).
 - Color-coded: 🟢 Green (≥70%), 🟠 Orange (50-69%), Gray (<50%)
 - ⚠️ Crash warnings for high-risk stocks
-- **27 Technical + Fundamental Indicators**: RSI, BB Position %, BB Width %, MACD, ATR, OBV, Stochastic %K/%D, ADX, CCI, MFI, Williams %R, ROC, Volume ROC, Volume Bias, Volume Spike, Change %, 5D Change, 1M Change, MA Cross, PE Ratio, Market Cap, Put/Call Ratio, Short Interest, Squeeze Score, Trading Signal, Trend Score
+- **28 Technical + Fundamental Indicators**: RSI, BB Position %, BB Width %, MACD, ATR, OBV, Stochastic %K/%D, ADX, CCI, MFI, Williams %R, ROC, Volume ROC, Volume Bias, Volume Spike, Change %, 5D Change, 1M Change, MA Cross, PE Ratio, EPS, Market Cap, Put/Call Ratio, Short Interest, Squeeze Score, Trading Signal, Trend Score
 - See [ML_GUIDE.md](ML_GUIDE.md) for complete guide
 
 **Troubleshooting ML N/A Values:**
@@ -498,10 +498,10 @@ The `mlbuild.yml` GitHub Actions workflow automatically retrains the ML model **
 - **Max Depth**: 5 to prevent overfitting
 - **Min Samples**: Configured for stability
 
-**Features Used** (27 technical + fundamental indicators):
+**Features Used** (28 technical + fundamental indicators):
 - Technical: RSI, Bollinger Bands, MACD, ATR, Volume patterns, OBV, Stochastic, ADX, CCI, MFI, Williams %R, ROC, Vol ROC
 - Momentum: Price changes (1D, 5D, 1M), Golden/Death crosses
-- Fundamentals: P/E ratio, market cap, put/call ratio, short interest
+- Fundamentals: P/E ratio, EPS, market cap, put/call ratio, short interest
 - Market: Squeeze levels, active signals, trend scores
 
 ### ML Model Files
