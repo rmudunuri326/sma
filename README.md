@@ -431,67 +431,84 @@ pip install -r requirements.txt
 
 ## ML Model Training & Automation
 
-### 🚀 Smart ML Training with Data Caching
+### 🚀 Professional ML Training with Smart Caching
 
-The ML system uses intelligent data caching to avoid re-downloading historical data:
+The ML system features **enterprise-grade code quality** with intelligent data caching:
 
-**First Training Run:**
-- Downloads 2 years of data for all tickers (~504 trading days)
-- Caches data locally in `data/stock_cache/`
-- Takes ~10-15 minutes for 200+ tickers
+**Code Quality Features:**
+- **Type Hints**: Full type annotations for reliability
+- **Structured Logging**: Professional logging with timestamps and levels
+- **Error Handling**: Robust exception handling with graceful fallbacks
+- **Production Ready**: Optimized for automated deployment
 
-**Subsequent Runs:**
-- Only fetches new data since last cache update
-- Uses cached data for existing tickers
-- Takes ~1-2 minutes (10x faster!)
+**Smart Data Management:**
+- **First Training Run**: Downloads 2 years of data for all tickers (~504 trading days), caches locally in `data/stock_cache/`, takes ~10-15 minutes for 200+ tickers
+- **Subsequent Runs**: Only fetches new data since last cache update, uses cached data for existing tickers, takes ~1-2 minutes (10x faster!)
+- **Automatic Updates**: Cache stays fresh with latest market data
 
 ### Manual ML Training
 
-Train the ML model on your ticker data:
+Train the ML model on your ticker data with professional logging:
 
 ```bash
 # Quiet mode (default) - clean output for automation
 python3 ml_predictor.py
 
-# Verbose mode - detailed progress and metrics
+# Verbose mode - detailed progress, metrics, and debugging
 python3 ml_predictor.py --verbose
 
 # Help
 python3 ml_predictor.py --help
 ```
 
-**Training Process:**
-- Reads tickers from `data/tickers.csv`
-- Uses smart caching for efficient data loading
-- Trains Gradient Boosting model on historical patterns
-- Saves model files to `data/ml_models/`
-- Shows accuracy and top features
+**Advanced Training Features:**
+- **Stratified Sampling**: Balanced class distribution for better model performance
+- **Feature Scaling**: Proper normalization with StandardScaler
+- **Robust Validation**: Cross-validation with detailed metrics in verbose mode
+- **Error Recovery**: Individual ticker failures don't break entire training
+- **Progress Tracking**: Smart progress reporting (every 50 tickers in quiet mode)
 
 ### Automated ML Training
 
-The `mlbuild.yml` GitHub Actions workflow automatically retrains the ML model **daily on working days**:
+The `mlbuild.yml` GitHub Actions workflow automatically retrains the ML model **daily on working days** with enterprise-grade reliability:
 
-- **Schedule**: Monday-Friday at 3:00 AM PST (11:00 AM UTC)
-- **Trigger**: Manual via GitHub Actions UI or automatic daily
-- **Smart Process**:
+- **Schedule**: Monday-Friday at 3:00 AM PST (11:00 AM UTC) - optimal market off-hours timing
+- **Trigger**: Manual via GitHub Actions UI or automatic daily schedule
+- **Enterprise Process**:
   - Updates stock data cache with latest market data
-  - Retrains model on current market conditions
-  - Commits both model files AND stock cache (flat history)
-  - No code changes committed (only data updates)
+  - Retrains model on current market conditions using stratified sampling
+  - Commits both model files AND stock cache with flat git history
+  - Comprehensive logging and error handling
+  - No code changes committed (only data/model updates)
 
-**Benefits:**
+**Production Benefits:**
 - Models stay current with evolving market patterns
-- Stock cache keeps historical data fresh
-- Fully automated with smart caching
+- Stock cache keeps historical data fresh and optimized
+- Fully automated with enterprise-grade error handling
 - Flat git history prevents repository bloat
-- Runs during market off-hours for optimal timing
+- Runs during optimal market off-hours timing
+- Professional logging for monitoring and debugging
+
+### ML Model Architecture
+
+**Algorithm**: Gradient Boosting Classifier (XGBoost-inspired)
+- **Estimators**: 200 trees for robust predictions
+- **Learning Rate**: 0.1 for balanced convergence
+- **Max Depth**: 5 to prevent overfitting
+- **Min Samples**: Configured for stability
+
+**Features Used** (18 technical + fundamental indicators):
+- Technical: RSI, Bollinger Bands, MACD, ATR, Volume patterns
+- Momentum: Price changes (1D, 5D, 1M), Golden/Death crosses
+- Fundamentals: P/E ratio, market cap, put/call ratio, short interest
+- Market: Squeeze levels, active signals, trend scores
 
 ### ML Model Files
 
-- `data/ml_models/breakout_crash_model.pkl` - Gradient Boosting model
+- `data/ml_models/breakout_crash_model.pkl` - Trained Gradient Boosting model (200 estimators)
 - `data/ml_models/feature_scaler.pkl` - Feature normalization scaler
-- `data/stock_cache/*.pkl` - Cached historical data per ticker
-- Models auto-loaded by `stocks.py` for predictions
+- `data/stock_cache/*.pkl` - Cached historical data per ticker (auto-managed)
+- Models auto-loaded by `stocks.py` for real-time predictions
 - Cache enables 10x faster subsequent training runs
 
 ## Usage

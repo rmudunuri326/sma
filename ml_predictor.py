@@ -6,40 +6,59 @@ Trains models on historical data to predict:
 - CRASH: Stocks likely to drop >50% in 6-12 months
 - NEUTRAL: Normal price action
 
-Features used:
-- Technical indicators (RSI, MACD, BB, Ichimoku)
-- Volume patterns and momentum
-- Fundamental metrics (P/E, growth rates)
-- Market sentiment (Put/Call, Short Interest)
-- Signal confidence and trend scores
+Features used (expected keys in stock_data dict):
+- Technical indicators: 'rsi', 'bb_position_pct', 'bb_width_pct', 'macd_label', 'atr_14'
+- Volume & momentum: 'volume_bias', 'volume_spike', 'change_pct', 'change_5d', 'change_1m'
+- Moving averages: 'golden_cross', 'death_cross'
+- Fundamentals: 'pe_ratio', 'market_cap'
+- Sentiment: 'put_call_ratio', 'short_interest'
+- Squeeze: 'squeeze_level'
+- Signals/trend: 'active_signal', 'trend_score'
 
 Usage:
     from ml_predictor import predict_breakout_crash
-    
-    scores = predict_breakout_crash(stock_data)
-    # Returns: {'breakout_score': 0-100, 'crash_risk': 0-100, 'confidence': 0-100}
-"""
 
-import pandas as pd
-import numpy as np
-import pickle
+    scores = predict_breakout_crash(stock_data)
+    # Returns: {'breakout_score': 0-100, 'crash_risk': 0-100, 'prediction': str, 'confidence': 0-100}
+"""
+from __future__ import annotations
+
+import logging
 import os
+import pickle
+from collections import Counter
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+
+import numpy as np
+import pandas as pd
 
 # ML imports - install with: pip install scikit-learn xgboost
 try:
-    from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
+    from sklearn.ensemble import GradientBoostingClassifier
     from sklearn.preprocessing import StandardScaler
     from sklearn.model_selection import train_test_split
     from sklearn.metrics import classification_report, confusion_matrix
     import warnings
-    warnings.filterwarnings('ignore')
-    ML_AVAILABLE = True
-except ImportError:
-    ML_AVAILABLE = False
-    print("⚠️  ML libraries not installed. Run: pip install scikit-learn xgboost")
 
+    warnings.filterwarnings("ignore")
+    ML_AVAILABLE = True
+except Exception:
+    ML_AVAILABLE = False
+
+# yfinance: used to fetch market data. Import safely so module functions can be used without network if not needed.
+try:
+    import yfinance as yf  # type: ignore
+
+    YF_AVAILABLE = True
+except Exception:
+    yf = None  # type: ignore
+    YF_AVAILABLE = False
+
+# Setup logging
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s: %(message)s")
+logger = logging.getLogger(__name__)
 
 MODEL_DIR = Path("data/ml_models")
 MODEL_FILE = MODEL_DIR / "breakout_crash_model.pkl"
@@ -47,173 +66,211 @@ SCALER_FILE = MODEL_DIR / "feature_scaler.pkl"
 
 # Data caching for efficiency
 DATA_CACHE_DIR = Path("data/stock_cache")
-DATA_CACHE_DIR.mkdir(exist_ok=True)
+DATA_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def load_or_fetch_stock_data(ticker, force_refresh=False, verbose=False):
+def load_or_fetch_stock_data(ticker: str, force_refresh: bool = False, verbose: bool = False) -> pd.DataFrame:
     """
     Smart data loading: Use cached data when available, only fetch new data.
-    Returns up to 2 years of historical data.
+    Returns up to 2 years of historical data (yfinance history DataFrame).
+
+    If yfinance is not available, returns an empty DataFrame.
     """
+    if verbose:
+        logger.setLevel(logging.DEBUG)
+
     cache_file = DATA_CACHE_DIR / f"{ticker}.pkl"
 
     if cache_file.exists() and not force_refresh:
         try:
-            # Load cached data
             cached_data = pd.read_pickle(cache_file)
             last_date = cached_data.index.max()
-
-            # Check if we need to update (fetch data from last cached date to today)
             days_since_update = (pd.Timestamp.now() - last_date).days
 
-            if days_since_update < 7:  # Data is fresh enough (less than 1 week old)
+            if days_since_update < 7:
                 if verbose:
-                    print(f"  📂 Using cached data for {ticker} (last updated: {last_date.date()})")
+                    logger.info(f"📂 Using cached data for {ticker} (last updated: {last_date.date()})")
                 return cached_data
 
             # Fetch only new data since last cache
+            if not YF_AVAILABLE:
+                if verbose:
+                    logger.warning(f"⚠️  yfinance not available; returning cached data for {ticker}")
+                return cached_data
+
             if verbose:
-                print(f"  🔄 Updating {ticker} data (last: {last_date.date()})...")
+                logger.info(f"🔄 Updating {ticker} data (last: {last_date.date()})...")
             try:
                 new_data = yf.Ticker(ticker).history(start=last_date + pd.Timedelta(days=1))
                 if not new_data.empty:
-                    # Combine cached + new data
                     combined_data = pd.concat([cached_data, new_data])
-                    # Keep only last 2 years
                     cutoff_date = pd.Timestamp.now() - pd.DateOffset(years=2)
                     combined_data = combined_data[combined_data.index >= cutoff_date]
-
-                    # Save updated cache
                     combined_data.to_pickle(cache_file)
                     if verbose:
-                        print(f"  💾 Updated cache for {ticker} ({len(new_data)} new days)")
+                        logger.info(f"💾 Updated cache for {ticker} ({len(new_data)} new days)")
                     return combined_data
                 else:
                     if verbose:
-                        print(f"  📂 No new data for {ticker}, using cache")
+                        logger.info(f"📂 No new data for {ticker}, using cache")
                     return cached_data
-
             except Exception as e:
                 if verbose:
-                    print(f"  ⚠️  Failed to update {ticker}: {e}, using cache")
+                    logger.warning(f"⚠️  Failed to update {ticker}: {e}, using cache")
                 return cached_data
 
         except Exception as e:
             if verbose:
-                print(f"  ⚠️  Failed to load cache for {ticker}: {e}, fetching fresh data")
+                logger.warning(f"⚠️  Failed to load cache for {ticker}: {e}, fetching fresh data")
 
-    # Fetch fresh data (first time or cache failed)
+    # Fetch fresh data
+    if not YF_AVAILABLE:
+        if verbose:
+            logger.error("❌ yfinance not installed; cannot fetch fresh data.")
+        return pd.DataFrame()
+
     if verbose:
-        print(f"  📥 Fetching fresh data for {ticker}...")
+        logger.info(f"📥 Fetching fresh data for {ticker}...")
+
     try:
         stock_data = yf.Ticker(ticker).history(period="2y", auto_adjust=False)
         if not stock_data.empty:
             stock_data.to_pickle(cache_file)
             if verbose:
-                print(f"  💾 Cached data for {ticker} ({len(stock_data)} days)")
+                logger.info(f"💾 Cached data for {ticker} ({len(stock_data)} days)")
         return stock_data
     except Exception as e:
         if verbose:
-            print(f"  ❌ Failed to fetch data for {ticker}: {e}")
+            logger.error(f"❌ Failed to fetch data for {ticker}: {e}")
         return pd.DataFrame()
 
 
-def extract_features(stock_data):
+def extract_features(stock_data: Dict[str, Any]) -> List[float]:
     """
-    Extract ML features from stock data dictionary.
-    
-    Returns list of numerical features in consistent order.
+    Extract ML features from a stock_data dictionary.
+
+    Returns a list of numerical features in the consistent order of FEATURE_NAMES.
+
+    Note: uses dict.get(key, default) to preserve valid falsy values (e.g., 0).
     """
-    features = []
-    
+    features: List[float] = []
+
     # Technical Indicators
-    features.append(stock_data.get('rsi') or 50.0)  # RSI
-    features.append(stock_data.get('bb_position_pct') or 50.0)  # BB Position %
-    features.append(stock_data.get('bb_width_pct') or 10.0)  # BB Width %
-    features.append(1.0 if stock_data.get('macd_label') == 'Bullish' else (-1.0 if stock_data.get('macd_label') == 'Bearish' else 0.0))
-    features.append(stock_data.get('atr_14') or 0.0)  # ATR (volatility)
-    
+    features.append(float(stock_data.get("rsi", 50.0)))  # RSI
+    features.append(float(stock_data.get("bb_position_pct", 50.0)))  # BB Position %
+    features.append(float(stock_data.get("bb_width_pct", 10.0)))  # BB Width %
+    macd_label = stock_data.get("macd_label", None)
+    features.append(1.0 if macd_label == "Bullish" else (-1.0 if macd_label == "Bearish" else 0.0))
+    features.append(float(stock_data.get("atr_14", 0.0)))  # ATR (volatility)
+
     # Volume & Momentum
-    features.append(stock_data.get('volume_bias') or 0.0)  # Volume bias
-    features.append(1.0 if stock_data.get('volume_spike') else 0.0)  # Volume spike flag
-    features.append(stock_data.get('change_pct') or 0.0)  # Daily change %
-    features.append(stock_data.get('change_5d') or 0.0)  # 5-day change %
-    features.append(stock_data.get('change_1m') or 0.0)  # 1-month change %
-    
+    features.append(float(stock_data.get("volume_bias", 0.0)))  # Volume bias
+    features.append(1.0 if stock_data.get("volume_spike", False) else 0.0)  # Volume spike flag
+    features.append(float(stock_data.get("change_pct", 0.0)))  # Daily change %
+    features.append(float(stock_data.get("change_5d", 0.0)))  # 5-day change %
+    features.append(float(stock_data.get("change_1m", 0.0)))  # 1-month change %
+
     # Moving Averages & Crosses
-    features.append(1.0 if stock_data.get('golden_cross') else (-1.0 if stock_data.get('death_cross') else 0.0))
-    
+    features.append(1.0 if stock_data.get("golden_cross", False) else (-1.0 if stock_data.get("death_cross", False) else 0.0))
+
     # Fundamentals
-    features.append(stock_data.get('pe_ratio') or 0.0)  # P/E ratio
-    features.append(stock_data.get('market_cap') or 0.0)  # Market cap (log scale)
-    
+    features.append(float(stock_data.get("pe_ratio", 0.0)))  # P/E ratio
+    # market_cap can be large; caller/model should log-transform if desired
+    features.append(float(stock_data.get("market_cap", 0.0)))  # Market cap
+
     # Sentiment & Risk
-    features.append(stock_data.get('put_call_ratio') or 1.0)  # Put/Call ratio
-    features.append(stock_data.get('short_interest') or 0.0)  # Short interest %
-    
+    features.append(float(stock_data.get("put_call_ratio", 1.0)))  # Put/Call ratio
+    features.append(float(stock_data.get("short_interest", 0.0)))  # Short interest %
+
     # Squeeze Indicators
-    squeeze_level = stock_data.get('squeeze_level') or 'None'
-    squeeze_score = {'None': 0, 'Moderate': 1, 'High': 2, 'Extreme': 3}.get(squeeze_level, 0)
+    squeeze_level = stock_data.get("squeeze_level", "None")
+    squeeze_score = {"None": 0, "Moderate": 1, "High": 2, "Extreme": 3}.get(squeeze_level, 0)
     features.append(float(squeeze_score))
-    
+
     # Trading Signals
-    active_signal = stock_data.get('active_signal') or 'HOLD'
-    signal_map = {'BUY': 1.0, 'SHORT': -1.0, 'SELL': -0.5, 'HOLD': 0.0}
-    features.append(signal_map.get(active_signal, 0.0))
-    
+    active_signal = stock_data.get("active_signal", "HOLD")
+    signal_map = {"BUY": 1.0, "SHORT": -1.0, "SELL": -0.5, "HOLD": 0.0}
+    features.append(float(signal_map.get(active_signal, 0.0)))
+
     # Trend Score
-    features.append(stock_data.get('trend_score') or 0.0)
-    
+    features.append(float(stock_data.get("trend_score", 0.0)))
+
+    # Sanity check: feature length must match FEATURE_NAMES
+    if len(features) != len(FEATURE_NAMES):
+        raise ValueError(f"extract_features produced {len(features)} features but FEATURE_NAMES has {len(FEATURE_NAMES)} entries")
+
     return features
 
 
 FEATURE_NAMES = [
-    'rsi', 'bb_position_pct', 'bb_width_pct', 'macd_signal',
-    'atr_14', 'volume_bias', 'volume_spike', 'change_day',
-    'change_5d', 'change_1m', 'ma_cross', 'pe_ratio', 
-    'market_cap', 'put_call_ratio', 'short_interest',
-    'squeeze_score', 'trading_signal', 'trend_score'
+    "rsi",
+    "bb_position_pct",
+    "bb_width_pct",
+    "macd_signal",
+    "atr_14",
+    "volume_bias",
+    "volume_spike",
+    "change_day",
+    "change_5d",
+    "change_1m",
+    "ma_cross",
+    "pe_ratio",
+    "market_cap",
+    "put_call_ratio",
+    "short_interest",
+    "squeeze_score",
+    "trading_signal",
+    "trend_score",
 ]
 
 
-def train_model(historical_data, labels):
+def train_model(historical_data: List[Dict[str, Any]], labels: List[str], verbose: bool = False) -> Tuple[Any, Any]:
     """
     Train ML model on historical stock data.
-    
+
     Args:
         historical_data: List of stock data dictionaries
         labels: List of labels ('BREAKOUT', 'CRASH', 'NEUTRAL')
-    
+        verbose: When True, print detailed training metrics
+
     Returns:
         Trained model and scaler
     """
     if not ML_AVAILABLE:
-        raise ImportError("ML libraries not installed")
-    
+        raise ImportError("ML libraries not installed. Install scikit-learn and related packages.")
+
     # Extract features
     X = []
     y = []
-    
+
     for stock, label in zip(historical_data, labels):
         features = extract_features(stock)
         X.append(features)
         y.append(label)
-    
-    X = np.array(X)
+
+    X = np.array(X, dtype=float)
     y = np.array(y)
-    
+
     # Handle missing values
     X = np.nan_to_num(X, nan=0.0, posinf=0.0, neginf=0.0)
-    
+
     # Scale features
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
-    
-    # Split data
+
+    # Split data with stratify fallback if class counts are too small
+    counts = Counter(y)
+    do_stratify = len(counts) > 1 and all(c >= 2 for c in counts.values())
+    stratify_arg = y if do_stratify else None
+
+    if verbose:
+        logger.info(f"Training samples: {len(X_scaled)}, class distribution: {dict(counts)}")
+        logger.info(f"Using stratify={do_stratify}")
+
     X_train, X_test, y_train, y_test = train_test_split(
-        X_scaled, y, test_size=0.2, random_state=42, stratify=y
+        X_scaled, y, test_size=0.2, random_state=42, stratify=stratify_arg
     )
-    
+
     # Train Gradient Boosting Classifier
     model = GradientBoostingClassifier(
         n_estimators=200,
@@ -223,353 +280,376 @@ def train_model(historical_data, labels):
         min_samples_leaf=10,
         subsample=0.8,
         random_state=42,
-        verbose=1
+        verbose=0,
     )
-    
-    print(f"Training model on {len(X_train)} samples...")
+
+    logger.info(f"Training model on {len(X_train)} samples...")
     model.fit(X_train, y_train)
-    
+
     # Validation results
-    y_pred = model.predict(X_test)
-    accuracy = (y_pred == y_test).mean()
-    print(f"✅ Model trained with {accuracy:.1%} accuracy on test set")
-    
-    if verbose:
-        # Detailed metrics only in verbose mode
-        print("\n📊 Model Performance:")
-        print(classification_report(y_test, y_pred))
-        print("\nConfusion Matrix:")
-        print(confusion_matrix(y_test, y_pred))
-    
+    try:
+        y_pred = model.predict(X_test)
+        accuracy = (y_pred == y_test).mean()
+        logger.info(f"✅ Model trained with {accuracy:.1%} accuracy on test set")
+    except Exception:
+        y_pred = []
+        logger.warning("Could not compute predictions on test set for reporting")
+
+    if verbose and len(y_pred) > 0:
+        logger.info("\n📊 Model Performance:")
+        logger.info("\n" + classification_report(y_test, y_pred))
+        logger.info("\nConfusion Matrix:")
+        logger.info("\n" + str(confusion_matrix(y_test, y_pred)))
+
     # Feature importance
-    importances = model.feature_importances_
-    feature_imp = pd.DataFrame({
-        'feature': FEATURE_NAMES,
-        'importance': importances
-    }).sort_values('importance', ascending=False)
-    
-    if verbose:
-        print("\n🔝 Top 10 Most Important Features:")
-        print(feature_imp.head(10).to_string(index=False))
-    else:
-        # Show only top 3 features in quiet mode
-        top_features = feature_imp.head(3)['feature'].tolist()
-        print(f"🔝 Top features: {', '.join(top_features)}")
-    
+    try:
+        importances = model.feature_importances_
+        feature_imp = pd.DataFrame({"feature": FEATURE_NAMES, "importance": importances}).sort_values(
+            "importance", ascending=False
+        )
+        if verbose:
+            logger.info("\n🔝 Top 10 Most Important Features:")
+            logger.info("\n" + feature_imp.head(10).to_string(index=False))
+        else:
+            top_features = feature_imp.head(3)["feature"].tolist()
+            logger.info(f"🔝 Top features: {', '.join(top_features)}")
+    except Exception:
+        logger.debug("Model does not expose feature_importances_")
+
     # Save model
     MODEL_DIR.mkdir(parents=True, exist_ok=True)
-    with open(MODEL_FILE, 'wb') as f:
-        pickle.dump(model, f)
-    with open(SCALER_FILE, 'wb') as f:
-        pickle.dump(scaler, f)
-    
-    print(f"\n✅ Model saved to {MODEL_FILE}")
-    
+    try:
+        with open(MODEL_FILE, "wb") as f:
+            pickle.dump(model, f)
+        with open(SCALER_FILE, "wb") as f:
+            pickle.dump(scaler, f)
+        logger.info(f"✅ Model saved to {MODEL_FILE}")
+    except Exception as e:
+        logger.error(f"⚠️  Failed to save model: {e}")
+
     return model, scaler
 
 
-def load_model():
-    """Load trained model and scaler from disk."""
+def load_model() -> Tuple[Optional[Any], Optional[Any]]:
+    """Load trained model and scaler from disk. Returns (model, scaler) or (None, None)."""
     if not MODEL_FILE.exists() or not SCALER_FILE.exists():
+        logger.debug("Model or scaler files not found on disk.")
         return None, None
-    
+
     try:
-        with open(MODEL_FILE, 'rb') as f:
+        with open(MODEL_FILE, "rb") as f:
             model = pickle.load(f)
-        with open(SCALER_FILE, 'rb') as f:
+        with open(SCALER_FILE, "rb") as f:
             scaler = pickle.load(f)
         return model, scaler
     except Exception as e:
-        print(f"⚠️  Error loading model: {e}")
+        logger.warning(f"⚠️  Error loading model: {e}")
         return None, None
 
 
-def predict_breakout_crash(stock_data, model=None, scaler=None):
+def predict_breakout_crash(
+    stock_data: Dict[str, Any], model: Optional[Any] = None, scaler: Optional[Any] = None
+) -> Dict[str, Any]:
     """
     Predict breakout/crash probability for a single stock.
-    
+
     Args:
         stock_data: Dictionary with stock metrics
         model: Trained model (loads from disk if None)
         scaler: Feature scaler (loads from disk if None)
-    
+
     Returns:
         Dictionary with:
             - breakout_score: 0-100 (probability of breakout)
             - crash_risk: 0-100 (probability of crash)
-            - prediction: 'BREAKOUT' | 'CRASH' | 'NEUTRAL'
+            - prediction: label string
             - confidence: 0-100 (model confidence)
     """
     if not ML_AVAILABLE:
-        return {
-            'breakout_score': 0,
-            'crash_risk': 0,
-            'prediction': 'NEUTRAL',
-            'confidence': 0
-        }
-    
+        logger.warning("ML libraries not available - returning default neutral prediction")
+        return {"breakout_score": 0, "crash_risk": 0, "prediction": "NEUTRAL", "confidence": 0}
+
     # Load model if not provided
     if model is None or scaler is None:
         model, scaler = load_model()
-        if model is None:
-            return {
-                'breakout_score': 0,
-                'crash_risk': 0,
-                'prediction': 'NEUTRAL',
-                'confidence': 0
-            }
-    
+        if model is None or scaler is None:
+            logger.warning("Model or scaler not available on disk - returning default neutral prediction")
+            return {"breakout_score": 0, "crash_risk": 0, "prediction": "NEUTRAL", "confidence": 0}
+
     # Extract and scale features
     features = extract_features(stock_data)
-    X = np.array([features])
+    X = np.array([features], dtype=float)
     X = np.nan_to_num(X, nan=0.0, posinf=0.0, neginf=0.0)
-    X_scaled = scaler.transform(X)
-    
-    # Get prediction probabilities
-    proba = model.predict_proba(X_scaled)[0]
-    prediction = model.predict(X_scaled)[0]
-    
-    # Map to scores
-    # Assumes classes are ordered: ['BREAKOUT', 'CRASH', 'NEUTRAL']
-    classes = model.classes_
-    breakout_idx = list(classes).index('BREAKOUT') if 'BREAKOUT' in classes else 0
-    crash_idx = list(classes).index('CRASH') if 'CRASH' in classes else 1
-    
-    breakout_score = int(proba[breakout_idx] * 100)
-    crash_risk = int(proba[crash_idx] * 100)
-    confidence = int(max(proba) * 100)
-    
+
+    # Ensure scaler can transform
+    try:
+        X_scaled = scaler.transform(X)
+    except Exception as e:
+        logger.error(f"Failed to scale features: {e}")
+        return {"breakout_score": 0, "crash_risk": 0, "prediction": "NEUTRAL", "confidence": 0}
+
+    # Get prediction and probabilities (safe handling)
+    try:
+        if hasattr(model, "predict_proba"):
+            proba_arr = model.predict_proba(X_scaled)[0]
+            classes = list(model.classes_)
+            proba_map = {cls: float(proba_arr[i]) for i, cls in enumerate(classes)}
+            breakout_score = int(proba_map.get("BREAKOUT", 0.0) * 100)
+            crash_risk = int(proba_map.get("CRASH", 0.0) * 100)
+            confidence = int(max(proba_arr) * 100)
+        else:
+            # Fallback if model does not implement predict_proba
+            pred = model.predict(X_scaled)[0]
+            breakout_score = 100 if pred == "BREAKOUT" else 0
+            crash_risk = 100 if pred == "CRASH" else 0
+            confidence = 100
+    except Exception as e:
+        logger.error(f"Prediction failed: {e}")
+        return {"breakout_score": 0, "crash_risk": 0, "prediction": "NEUTRAL", "confidence": 0}
+
+    try:
+        prediction = model.predict(X_scaled)[0]
+    except Exception:
+        prediction = "NEUTRAL"
+
     return {
-        'breakout_score': breakout_score,
-        'crash_risk': crash_risk,
-        'prediction': prediction,
-        'confidence': confidence
+        "breakout_score": breakout_score,
+        "crash_risk": crash_risk,
+        "prediction": prediction,
+        "confidence": confidence,
     }
 
 
-def batch_predict(stock_list):
+def batch_predict(stock_list: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
     Predict for multiple stocks efficiently.
-    
+
     Args:
         stock_list: List of stock data dictionaries
-    
+
     Returns:
         List of prediction dictionaries
     """
     model, scaler = load_model()
-    if model is None:
+    if model is None or scaler is None:
+        logger.warning("Model not found; running individual predictions with no model (defaults).")
         return [predict_breakout_crash(s, None, None) for s in stock_list]
-    
-    results = []
+
+    results: List[Dict[str, Any]] = []
     for stock in stock_list:
         pred = predict_breakout_crash(stock, model, scaler)
         results.append(pred)
-    
+
     return results
 
 
-def get_tickers_from_file(file_path):
+def get_tickers_from_file(file_path: str) -> List[str]:
     """
-    Parse tickers from a file with sections like [SECTION].
+    Parse tickers from a file with simple sections and comma separated tickers.
+    Returns a sorted list of unique tickers.
     """
     tickers = set()
-    with open(file_path, 'r') as f:
+    with open(file_path, "r") as f:
         for line in f:
             line = line.strip()
-            if line.startswith('[') and line.endswith(']'):
+            if line.startswith("[") and line.endswith("]"):
                 continue
             if line:
-                # Split by comma and clean up tickers
-                tickers.update([t.strip() for t in line.split(',') if t.strip()])
+                tickers.update([t.strip() for t in line.split(",") if t.strip()])
     return sorted(list(tickers))
 
 
 # Example training data generator (for demonstration)
-def generate_synthetic_training_data(n_samples=1000):
+def generate_synthetic_training_data(n_samples: int = 1000) -> Tuple[List[Dict[str, Any]], List[str]]:
     """
-    Generate synthetic training data for demonstration.
-    
-    In production, replace with real historical data:
-    - Pull historical stock data from yfinance
-    - Calculate features at time T
-    - Label based on price movement T+6months
+    Generate synthetic training data for testing/demo purposes.
+    Replace with real historical feature extraction in production.
     """
     np.random.seed(42)
-    data = []
-    labels = []
-    
+    data: List[Dict[str, Any]] = []
+    labels: List[str] = []
+
     for _ in range(n_samples):
-        # Generate random stock features
         stock = {
-            'rsi': np.random.uniform(20, 80),
-            'bb_position_pct': np.random.uniform(0, 100),
-            'bb_width_pct': np.random.uniform(2, 20),
-            'macd_label': np.random.choice(['Bullish', 'Bearish', None]),
-            'atr_14': np.random.uniform(1, 10),
-            'volume_bias': np.random.uniform(-1, 1),
-            'volume_spike': np.random.choice([True, False]),
-            'change_pct': np.random.uniform(-10, 10),
-            'change_5d': np.random.uniform(-15, 15),
-            'change_1m': np.random.uniform(-20, 20),
-            'golden_cross': np.random.choice([True, False]),
-            'death_cross': np.random.choice([True, False]),
-            'pe_ratio': np.random.uniform(10, 50),
-            'market_cap': np.random.uniform(1e9, 1e12),
-            'put_call_ratio': np.random.uniform(0.5, 2.0),
-            'short_interest': np.random.uniform(0, 30),
-            'squeeze_level': np.random.choice(['None', 'Moderate', 'High', 'Extreme']),
-            'active_signal': np.random.choice(['BUY', 'SHORT', 'SELL', 'HOLD']),
-            'trend_score': np.random.uniform(-5, 5),
+            "rsi": np.random.uniform(20, 80),
+            "bb_position_pct": np.random.uniform(0, 100),
+            "bb_width_pct": np.random.uniform(2, 20),
+            "macd_label": np.random.choice(["Bullish", "Bearish", None]),
+            "atr_14": np.random.uniform(1, 10),
+            "volume_bias": np.random.uniform(-1, 1),
+            "volume_spike": np.random.choice([True, False]),
+            "change_pct": np.random.uniform(-10, 10),
+            "change_5d": np.random.uniform(-15, 15),
+            "change_1m": np.random.uniform(-20, 20),
+            "golden_cross": np.random.choice([True, False]),
+            "death_cross": np.random.choice([True, False]),
+            "pe_ratio": np.random.uniform(10, 50),
+            "market_cap": np.random.uniform(1e9, 1e12),
+            "put_call_ratio": np.random.uniform(0.5, 2.0),
+            "short_interest": np.random.uniform(0, 30),
+            "squeeze_level": np.random.choice(["None", "Moderate", "High", "Extreme"]),
+            "active_signal": np.random.choice(["BUY", "SHORT", "SELL", "HOLD"]),
+            "trend_score": np.random.uniform(-5, 5),
         }
-        
-        # Synthetic label based on features (simplified logic)
-        # In reality, label would come from actual future price movement
+
         score = 0
-        if stock['rsi'] < 30 and stock['active_signal'] == 'BUY':
+        if stock["rsi"] < 30 and stock["active_signal"] == "BUY":
             score += 2
-        if stock['golden_cross'] and stock['volume_spike']:
+        if stock["golden_cross"] and stock["volume_spike"]:
             score += 2
-        if stock['death_cross'] or stock['rsi'] > 70:
+        if stock["death_cross"] or stock["rsi"] > 70:
             score -= 2
-        
+
         if score >= 2:
-            label = 'BREAKOUT'
+            label = "BREAKOUT"
         elif score <= -2:
-            label = 'CRASH'
+            label = "CRASH"
         else:
-            label = 'NEUTRAL'
-        
+            label = "NEUTRAL"
+
         data.append(stock)
         labels.append(label)
-    
+
     return data, labels
 
 
 if __name__ == "__main__":
     import argparse
-    
-    parser = argparse.ArgumentParser(description='ML Stock Predictor - Train breakout/crash detection models')
-    parser.add_argument('--verbose', '-v', action='store_true', 
-                       help='Enable verbose console output')
+    import sys
+
+    parser = argparse.ArgumentParser(description="ML Stock Predictor - Train breakout/crash detection models")
+    parser.add_argument("--verbose", "-v", action="store_true", help="Enable verbose console output")
     args = parser.parse_args()
-    
-    verbose = args.verbose
-    
-    print("🤖 ML Stock Predictor - Training..." if not verbose else "🤖 ML Stock Predictor - Training Demo\n")
-    
+
+    if args.verbose:
+        logger.setLevel(logging.DEBUG)
+        logger.debug("🤖 ML Stock Predictor - Training Demo (verbose)")
+
     if not ML_AVAILABLE:
-        print("❌ Please install ML libraries: pip install scikit-learn")
-        exit(1)
+        logger.error("❌ Please install ML libraries: pip install scikit-learn")
+        sys.exit(1)
 
-    try:
-        import yfinance as yf
-    except ImportError:
-        print("❌ Please install yfinance: pip install yfinance")
-        exit(1)
+    if not YF_AVAILABLE:
+        logger.warning("⚠️ yfinance is not installed. Fetching real historical data will not be possible.")
 
-    # --- Use real data from tickers.csv for training ---
+    # --- Use real data from tickers.csv for training if available ---
     TICKER_FILE = Path("data/tickers.csv")
     if not TICKER_FILE.exists():
-        print(f"❌ Ticker file not found at {TICKER_FILE}")
-        print("Falling back to synthetic data generation.")
-        # Generate synthetic training data
-        print("📊 Generating synthetic training data...")
+        logger.warning(f"❌ Ticker file not found at {TICKER_FILE}")
+        logger.info("Falling back to synthetic data generation.")
+        logger.info("📊 Generating synthetic training data...")
         training_data, labels = generate_synthetic_training_data(n_samples=2000)
     else:
-        print(f"✅ Found ticker file at {TICKER_FILE}")
-        if verbose:
-            print("⚙️  Processing real historical data for training. This may take a while...")
-        
-        tickers = get_tickers_from_file(TICKER_FILE)
-        print(f"⚙️  Processing {len(tickers)} tickers...")
+        logger.info(f"✅ Found ticker file at {TICKER_FILE}")
+        if args.verbose:
+            logger.info("⚙️  Processing real historical data for training. This may take a while...")
 
-        # This is a simplified feature/label generation process for demonstration.
-        # For a production system, this logic should be much more robust.
+        tickers = get_tickers_from_file(str(TICKER_FILE))
+        logger.info(f"⚙️  Processing {len(tickers)} tickers...")
+
         training_data = []
         labels = []
 
         for i, ticker in enumerate(tickers):
             # Show progress every 50 tickers (or all if verbose)
-            if verbose or (i + 1) % 50 == 0 or i == 0:
-                progress_msg = f"Processing {ticker} ({i+1}/{len(tickers)})" if verbose else f"Processing tickers... ({i+1}/{len(tickers)})"
-                print(progress_msg)
-            
+            if args.verbose or (i + 1) % 50 == 0 or i == 0:
+                progress_msg = f"Processing {ticker} ({i+1}/{len(tickers)})" if args.verbose else f"Processing tickers... ({i+1}/{len(tickers)})"
+                logger.info(progress_msg)
+
             try:
-                stock_hist = load_or_fetch_stock_data(ticker, verbose=verbose)
-                if len(stock_hist) < 252: # Need at least 1 year of data
+                stock_hist = load_or_fetch_stock_data(ticker, verbose=args.verbose)
+                if stock_hist.empty or len(stock_hist) < 252:
                     continue
 
-                # Use data from 1 year ago to generate features
+                # Use a single-row snapshot from 1 year ago (simplified placeholder)
                 one_year_ago_data = stock_hist.iloc[-252]
-                
-                # Simplified feature creation - in a real scenario, you'd calculate
-                # all the features that extract_features expects.
+
+                # Simplified feature creation - in a real scenario compute real features here
                 features = {
-                    'rsi': np.random.uniform(30, 70), # Placeholder
-                    'pe_ratio': one_year_ago_data.get('P/E Ratio', 25),
-                    'market_cap': one_year_ago_data.get('Market Cap', 1e9),
-                    'change_1m': (one_year_ago_data['Close'] / stock_hist.iloc[-252-21]['Close'] - 1) * 100 if len(stock_hist) > 252+21 else 0,
+                    "rsi": np.random.uniform(30, 70),  # Placeholder
+                    "pe_ratio": one_year_ago_data.get("P/E Ratio", 25) if isinstance(one_year_ago_data, pd.Series) else 25,
+                    "market_cap": one_year_ago_data.get("Market Cap", 1e9) if isinstance(one_year_ago_data, pd.Series) else 1e9,
+                    "change_1m": (one_year_ago_data["Close"] / stock_hist.iloc[-252 - 21]["Close"] - 1) * 100 if len(stock_hist) > 252 + 21 else 0,
+                    # Fill other keys with defaults so extract_features works
+                    "bb_position_pct": 50.0,
+                    "bb_width_pct": 10.0,
+                    "macd_label": None,
+                    "atr_14": 0.0,
+                    "volume_bias": 0.0,
+                    "volume_spike": False,
+                    "change_pct": 0.0,
+                    "change_5d": 0.0,
+                    "golden_cross": False,
+                    "death_cross": False,
+                    "put_call_ratio": 1.0,
+                    "short_interest": 0.0,
+                    "squeeze_level": "None",
+                    "active_signal": "HOLD",
+                    "trend_score": 0.0,
                 }
 
-                # Label based on future performance (next 6-12 months)
-                future_price_6m = stock_hist.iloc[-126]['Close']
-                future_price_12m = stock_hist.iloc[-1]['Close']
-                
-                initial_price = one_year_ago_data['Close']
-                
-                label = 'NEUTRAL'
+                # Label based on future performance (next ~6 and 12 months in the existing data)
+                # Note: This simplistic label logic relies on the specific indexing used above.
+                try:
+                    future_price_6m = stock_hist.iloc[-126]["Close"]
+                    future_price_12m = stock_hist.iloc[-1]["Close"]
+                    initial_price = one_year_ago_data["Close"]
+                except Exception:
+                    # If indexing fails, skip this ticker
+                    continue
+
+                label = "NEUTRAL"
                 if (future_price_6m / initial_price > 2.0) or (future_price_12m / initial_price > 2.0):
-                    label = 'BREAKOUT'
+                    label = "BREAKOUT"
                 elif (future_price_6m / initial_price < 0.5) or (future_price_12m / initial_price < 0.5):
-                    label = 'CRASH'
-                
+                    label = "CRASH"
+
                 training_data.append(features)
                 labels.append(label)
 
             except Exception as e:
-                if verbose:
-                    print(f"  Could not process {ticker}: {e}")
+                if args.verbose:
+                    logger.exception(f"  Could not process {ticker}: {e}")
 
         if not training_data:
-            print("❌ No training data could be generated from the tickers. Exiting.")
-            exit(1)
+            logger.error("❌ No training data could be generated from the tickers. Exiting.")
+            sys.exit(1)
 
     # Train model
-    print("\n🏋️  Training model...")
-    model, scaler = train_model(training_data, labels)
-    
+    logger.info("\n🏋️  Training model...")
+    model, scaler = train_model(training_data, labels, verbose=args.verbose)
+
     # Test prediction
-    print("\n🔮 Testing prediction on sample stock...")
+    logger.info("\n🔮 Testing prediction on sample stock...")
     test_stock = {
-        'rsi': 25,
-        'bb_position_pct': 5,
-        'bb_width_pct': 3,
-        'macd_label': 'Bullish',
-        'atr_14': 2.5,
-        'volume_bias': 0.6,
-        'volume_spike': True,
-        'change_pct': 3.2,
-        'change_5d': 8.5,
-        'change_1m': 15.0,
-        'golden_cross': True,
-        'death_cross': False,
-        'pe_ratio': 25,
-        'market_cap': 50e9,
-        'put_call_ratio': 0.8,
-        'short_interest': 15,
-        'squeeze_level': 'High',
-        'active_signal': 'BUY',
-        'trend_score': 3.5,
+        "rsi": 25,
+        "bb_position_pct": 5,
+        "bb_width_pct": 3,
+        "macd_label": "Bullish",
+        "atr_14": 2.5,
+        "volume_bias": 0.6,
+        "volume_spike": True,
+        "change_pct": 3.2,
+        "change_5d": 8.5,
+        "change_1m": 15.0,
+        "golden_cross": True,
+        "death_cross": False,
+        "pe_ratio": 25,
+        "market_cap": 50e9,
+        "put_call_ratio": 0.8,
+        "short_interest": 15,
+        "squeeze_level": "High",
+        "active_signal": "BUY",
+        "trend_score": 3.5,
     }
-    
+
     result = predict_breakout_crash(test_stock, model, scaler)
-    if verbose:
-        print(f"\n📈 Prediction Results:")
-        print(f"   Breakout Score: {result['breakout_score']}%")
-        print(f"   Crash Risk: {result['crash_risk']}%")
-        print(f"   Prediction: {result['prediction']}")
-        print(f"   Confidence: {result['confidence']}%")
-        print("\n✅ Model ready for production use!")
+    if args.verbose:
+        logger.info(f"\n📈 Prediction Results:")
+        logger.info(f"   Breakout Score: {result['breakout_score']}%")
+        logger.info(f"   Crash Risk: {result['crash_risk']}%")
+        logger.info(f"   Prediction: {result['prediction']}")
+        logger.info(f"   Confidence: {result['confidence']}%")
+        logger.info("\n✅ Model ready for production use!")
     else:
-        print(f"✅ Model ready! Sample prediction: {result['prediction']} ({result['breakout_score']}% breakout, {result['crash_risk']}% crash risk)")
+        logger.info(f"✅ Model ready! Sample prediction: {result['prediction']} ({result['breakout_score']}% breakout, {result['crash_risk']}% crash risk)")
