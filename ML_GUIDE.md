@@ -48,17 +48,29 @@ pip install scikit-learn xgboost
 
 ### 1. Training the Model
 
-The model needs historical data to learn patterns. You have two options:
+The model needs historical data to learn patterns. The training script automatically detects and uses your data:
 
-**Option A: Use Synthetic Demo Data (for testing)**
+**Primary Method: Train on Your Tickers (Recommended)**
 ```bash
-# Generate synthetic training data and train model
+# Train ML model using tickers from data/tickers.csv
 python3 ml_predictor.py
 ```
 
-**Option B: Use Real Historical Data (recommended for production)**
+This will:
+- Load tickers from `data/tickers.csv` (if it exists)
+- Fetch real historical data for each ticker
+- Train the model on actual market patterns
+- Save model files to `data/ml_models/`
 
-Create a training script (`train_ml_model.py`):
+**Fallback: Synthetic Demo Data (if no tickers.csv)**
+```bash
+# If data/tickers.csv doesn't exist, generates synthetic training data
+python3 ml_predictor.py
+```
+
+### Manual Training (Advanced Users)
+
+For custom training with specific tickers, create a training script (`train_ml_model.py`):
 
 ```python
 import yfinance as yf
@@ -66,14 +78,13 @@ import pandas as pd
 from ml_predictor import train_model
 from datetime import datetime, timedelta
 
-# 1. Fetch historical data
+# Load tickers from data/tickers.csv (or specify manually)
 tickers = ['NVDA', 'MU', 'AMD', 'TSLA', 'GME', 'AAPL', 'MSFT', ...] # Add your tickers
 historical_data = []
 labels = []
 
 for ticker in tickers:
-    # Fetch data from 2 years ago
-    end_date = datetime.now() - timedelta(days=365*2)
+    # Fetch historical data (2 years)
     stock = yf.Ticker(ticker)
     hist = stock.history(period="2y")
     
@@ -85,7 +96,7 @@ for ticker in tickers:
     historical_data.append(features_dict)
     labels.append(label)
 
-# 2. Train model
+# Train model
 model, scaler = train_model(historical_data, labels)
 ```
 
