@@ -4,6 +4,29 @@
 
 The ML Stock Predictor identifies breakout candidates (NVDA, MU-like patterns) and crash risks using machine learning trained on historical data.
 
+## How to Run the Model Trainer
+
+You can train the ML model manually or automate it with GitHub Actions:
+
+### Manual Run (Local)
+
+1. Open a terminal in your project directory.
+2. Run:
+    ```bash
+    python3 ml_predictor.py
+    ```
+3. This will read tickers from `data/tickers.csv`, fetch historical data, train the model, and save the model files to `data/ml_models/`.
+
+### Automated Run (GitHub Actions)
+
+If you want to automate retraining, use the provided workflow:
+
+1. See `.github/workflows/mlbuild.yml` in your repo.
+2. This workflow runs weekly (Sunday 5PM PST) and can be triggered manually from the Actions tab.
+3. It will train the model and commit the updated model files to the repository automatically.
+
+**Note:** The dashboard (`stocks.py`) will automatically use the latest model files for predictions if they exist.
+
 ## Features
 
 - **Breakout Score (0-100%)**: Probability of >100% gain in 6-12 months

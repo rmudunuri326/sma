@@ -1,6 +1,24 @@
 ![cf48c501-9030-4cec-9dde-cf5cc067dbe1](https://github.com/user-attachments/assets/20251d2d-fdf2-4197-b166-d091e752e3ed)
 
 ## Features
+## Machine Learning Integration
+
+### 🚀 ML-Powered Stock Predictions (NEW!)
+**Identify the Next NVDA, MU Before They Breakout**: Machine learning model trained on historical winners/losers to predict:
+- **Breakout Score (0-100%)**: Stocks with >100% gain potential (like NVDA, MU patterns)
+- **Crash Risk (0-100%)**: Stocks at risk of >50% decline
+- **Integrated in INDICATORS Column**: ML breakout/crash scores are now fully merged into the INDICATORS column (no separate column).
+- Color-coded: 🟢 Green (≥70%), 🟠 Orange (50-69%), Gray (<50%)
+- ⚠️ Crash warnings for high-risk stocks
+- See [ML_GUIDE.md](ML_GUIDE.md) for complete guide
+
+**Troubleshooting ML N/A Values:**
+- If ML values show as N/A, check:
+  - The ML model files exist in `data/ml_models/` (see ML_GUIDE.md for retraining)
+  - The ticker is supported by the model (U.S. equities only)
+  - All required features are available for the ticker
+  - The ticker is not an ETF or non-stock symbol
+  - See the console output for any error messages
 
 ### 📊 Multi-View Dashboard
 **Auto-Detecting Market Hours**: The dashboard automatically detects whether it's regular trading hours (9:30 AM - 4:00 PM ET, Mon-Fri) or extended hours, and fetches appropriate data accordingly. Extended hours sessions are indicated with a badge at the top of the dashboard.
@@ -176,15 +194,13 @@ Flexible ticker list format with section support:
   [TICKERS]
   AAPL, MSFT, GOOGL, ...
   ```
-- **Simple Format** (backward compatible):
+**Simple Format** (backward compatible):
   ```
   AAPL, MSFT, GOOGL
   NVDA
   TSLA
   ```
-- Sections auto-populate MEME and M7 filter categories
-- Supports comma-separated or newline-separated tickers
-- Automatically deduplicated
+*Sections auto-populate MEME and M7 filter categories. Ticker lists are automatically deduplicated and sectioned, regardless of format.*
 
 ### 📈 Market Indicators
 Consolidated market overview with all global indexes on a single line:
@@ -216,6 +232,8 @@ Automatic alert generation for:
 - Volume spikes
 - Bollinger Band squeezes and breakouts
 - Active trading signals (🟢 BUY, 🟠 SELL, 🔴 SHORT)
+- **ML Breakout alerts** (≥70% breakout score)
+- **ML Crash Risk alerts** (≥50% crash risk)
 - Custom user-defined alerts (via `data/alerts.json`)
 
 Alert banner displays at top with color-coded hearts:
@@ -224,6 +242,8 @@ Alert banner displays at top with color-coded hearts:
 - 💚 Buy signals
 - 🧡 Sell signals (orange)
 - ❤️ Short signals
+- 🚀 ML Breakout alerts
+- ⚠️ ML Crash Risk alerts
 
 ### ⚡ Performance Optimizations
 - **VIX Caching**: 30-minute TTL eliminates redundant API calls

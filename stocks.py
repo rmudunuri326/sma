@@ -82,6 +82,14 @@ import time
 from functools import lru_cache
 import threading
 
+# ML Predictor (optional - gracefully degrades if not available)
+try:
+    from ml_predictor import predict_breakout_crash, batch_predict, ML_AVAILABLE
+except ImportError:
+    ML_AVAILABLE = False
+    def predict_breakout_crash(stock_data):
+        return {'breakout_score': 0, 'crash_risk': 0, 'prediction': 'NEUTRAL', 'confidence': 0}
+
 ALERTS_FILE = "data/alerts.json"
 UTC = pytz.utc
 PST = pytz.timezone("America/Los_Angeles")
@@ -628,8 +636,10 @@ def check_alerts(data):
         buy_signals,
         sell_signals,
         short_signals,
+        ml_breakout,
+        ml_crash,
         custom,
-    ) = ([], [], [], [], [], [], [], [], [])
+    ) = ([], [], [], [], [], [], [], [], [], [], [])
     stock_dict = {x["ticker"]: x for x in data}
 
     for a in custom_alerts:
@@ -698,6 +708,14 @@ def check_alerts(data):
                 low_52w.append(
                     {"ticker": s["ticker"], "msg": f"NEAR 52W LOW ({pos_pct:.1f}%)"}
                 )
+        
+        # ML Breakout and Crash alerts
+        ml_score = s.get("ml_breakout_score", 0)
+        ml_crash_risk = s.get("ml_crash_risk", 0)
+        if ml_score >= 70:
+            ml_breakout.append({"ticker": s["ticker"], "msg": f"ML BREAKOUT {ml_score:.0f}%"})
+        if ml_crash_risk >= 50:
+            ml_crash.append({"ticker": s["ticker"], "msg": f"ML CRASH RISK {ml_crash_risk:.0f}%"})
 
     def fmt(items, emoji, label):
         return (
@@ -721,6 +739,10 @@ def check_alerts(data):
         grouped.append(fmt(crash, "💥", "Crash"))
     if volume_spike:
         grouped.append(fmt(volume_spike, "📈", "Vol Spike"))
+    if ml_breakout:
+        grouped.append(fmt(ml_breakout, "🚀", "ML Breakout"))
+    if ml_crash:
+        grouped.append(fmt(ml_crash, "⚠️", "ML Crash"))
     if custom:
         grouped.append(fmt(custom, "⚡", "Custom"))
     return {"grouped": grouped, "time": now.strftime("%I:%M %p")}
@@ -1518,6 +1540,27 @@ def fetch(ticker, ext=False, retry=0):
             "death_cross": death_cross,
             "golden_cross": golden_cross,
         }
+        
+        # ML Predictions (if available)
+        if ML_AVAILABLE:
+            try:
+                ml_pred = predict_breakout_crash(result)
+                result["ml_breakout_score"] = ml_pred['breakout_score']
+                result["ml_crash_risk"] = ml_pred['crash_risk']
+                result["ml_prediction"] = ml_pred['prediction']
+                result["ml_confidence"] = ml_pred['confidence']
+            except Exception:
+                result["ml_breakout_score"] = 0
+                result["ml_crash_risk"] = 0
+                result["ml_prediction"] = "N/A"
+                result["ml_confidence"] = 0
+        else:
+            result["ml_breakout_score"] = 0
+            result["ml_crash_risk"] = 0
+            result["ml_prediction"] = "N/A"
+            result["ml_confidence"] = 0
+        
+        return result
     except Exception as e:
         error_msg = str(e)
         if "Too Many Requests" in error_msg or "Rate limit" in error_msg:
@@ -2364,6 +2407,22 @@ Short: {na(r['short_percent'],"{:.1f}%")} ({na(r['days_to_cover'],"{:.1f}d")})<b
 <span class="{hv_cls}">Volatility: {hv_str}</span><br>
 <span class="{opt_dir_cls}">Opt Dir: {r['options_direction']}</span><br>
 <span class="{bias_cls}">Bias: {'Down' if r['down_volume_bias'] else 'Up'}</span>"""
+        
+        # Add ML breakout score and crash risk
+        ml_score = r.get('ml_breakout_score', 0)
+        ml_crash = r.get('ml_crash_risk', 0)
+        if ml_score > 0:
+            if ml_score >= 70:
+                ml_html = f'<span style="color:var(--pos);font-weight:bold;font-size:1.1em">🚀 {ml_score}%</span>'
+            elif ml_score >= 50:
+                ml_html = f'<span style="color:#ff8800;font-weight:600">🚀 {ml_score}%</span>'
+            else:
+                ml_html = f'<span style="color:var(--text);opacity:0.6;font-size:0.9em">🚀 {ml_score}%</span>'
+        else:
+            ml_html = '<span style="opacity:0.3">🚀 N/A</span>'
+        if ml_crash >= 50:
+            ml_html += f'<br><span style="color:var(--neg);font-size:0.85em">⚠️ {ml_crash}%</span>'
+        indicators_html += f"<br>{ml_html}"
         
         # Add confidence and risk management if available
         if conf_str != 'N/A':
