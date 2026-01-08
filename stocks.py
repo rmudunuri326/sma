@@ -750,24 +750,15 @@ def check_alerts(data):
     accordion_items = []
     accordion_js_contents = []
     idx = 0
+    # Add CSS for selected link
+    accordion_css = """
+    <style>
+    .accordion-header { cursor:pointer; padding:2px 8px; border-radius:4px; transition:background 0.2s; }
+    .accordion-header.active { background:#e0e7ff; color:#1e40af; font-weight:bold; box-shadow:0 0 2px #1e40af; }
+    </style>
+    """
 
-    # --- Reordered: Surge & Crash | Vol Spike | Signals | ML Prediction | 52W High/Low | Custom ---
-    # Surge & Crash
-    tickers_surge = ', '.join(a['ticker'] for a in surge) if surge else ''
-    tickers_crash = ', '.join(a['ticker'] for a in crash) if crash else ''
-    content = (
-        (f"<div><span style='color:#20813e'>🚀 Surge:</span> {tickers_surge}</div>" if tickers_surge else '') +
-        (f"<div><span style='color:#c74634'>💥 Crash:</span> {tickers_crash}</div>" if tickers_crash else '')
-    )
-    accordion_items.append(f"<span class='accordion-header' onclick='showAccordion({idx})'>💣 Surge & Crash</span>")
-    accordion_js_contents.append(content)
-    idx += 1
-    # Vol Spike
-    tickers_vol = ', '.join(a['ticker'] for a in volume_spike) if volume_spike else ''
-    content = f"<div><span style='color:#c74634'>Vol Spike:</span> {tickers_vol}</div>" if tickers_vol else ''
-    accordion_items.append(f"<span class='accordion-header' onclick='showAccordion({idx})'>📈 Vol Spike</span>")
-    accordion_js_contents.append(content)
-    idx += 1
+    # --- Ordered: Signals | ML Prediction | Surge & Crash | Vol Spike | 52W High/Low | Custom ---
     # Signals
     tickers_buy = ', '.join(a['ticker'] for a in buy_signals) if buy_signals else ''
     tickers_sell = ', '.join(a['ticker'] for a in sell_signals) if sell_signals else ''
@@ -790,6 +781,22 @@ def check_alerts(data):
     accordion_items.append(f"<span class='accordion-header' onclick='showAccordion({idx})'>🔮 ML Prediction</span>")
     accordion_js_contents.append(content)
     idx += 1
+    # Surge & Crash
+    tickers_surge = ', '.join(a['ticker'] for a in surge) if surge else ''
+    tickers_crash = ', '.join(a['ticker'] for a in crash) if crash else ''
+    content = (
+        (f"<div><span style='color:#20813e'>🚀 Surge:</span> {tickers_surge}</div>" if tickers_surge else '') +
+        (f"<div><span style='color:#c74634'>💥 Crash:</span> {tickers_crash}</div>" if tickers_crash else '')
+    )
+    accordion_items.append(f"<span class='accordion-header' onclick='showAccordion({idx})'>💣 Surge & Crash</span>")
+    accordion_js_contents.append(content)
+    idx += 1
+    # Vol Spike
+    tickers_vol = ', '.join(a['ticker'] for a in volume_spike) if volume_spike else ''
+    content = f"<div><span style='color:#c74634'>Vol Spike:</span> {tickers_vol}</div>" if tickers_vol else ''
+    accordion_items.append(f"<span class='accordion-header' onclick='showAccordion({idx})'>📈 Vol Spike</span>")
+    accordion_js_contents.append(content)
+    idx += 1
     # 52W High/Low
     tickers_high = ', '.join(a['ticker'] for a in high_52w) if high_52w else ''
     tickers_low = ', '.join(a['ticker'] for a in low_52w) if low_52w else ''
@@ -805,7 +812,7 @@ def check_alerts(data):
     accordion_items.append(f"<span class='accordion-header' onclick='showAccordion({idx})'>⚡ Custom</span>")
     accordion_js_contents.append(f"<div><span style='color:#c74634'>Custom Alerts:</span> {custom_content}</div>" if custom_content else '')
     # Render group links with | separator, no trailing |
-    accordion_html = "<div id='alert-accordion' style='display:inline'>" + ' | '.join(accordion_items) + "</div>"
+    accordion_html = accordion_css + "<div id='alert-accordion' style='display:inline'>" + ' | '.join(accordion_items) + "</div>"
     accordion_html += f"<div id='accordion-details'></div><script>var accordionContents = {json.dumps(accordion_js_contents)};function showAccordion(idx){{document.querySelectorAll('.accordion-header').forEach((el,i)=>el.classList.toggle('active',i===idx));var details=document.getElementById('accordion-details');if(details)details.innerHTML=accordionContents[idx]||'';}}if(accordionContents.length>0)showAccordion(0);</script>"
     grouped.append(accordion_html)
     return {"grouped": grouped, "time": now.strftime("%I:%M %p")}
